@@ -11,11 +11,209 @@ const { getRandomProfileUrl } = require("../data/profile-urls");
 
 const LIKE_SELECTOR = 'div[aria-label="Like"]';
 const LIKE_TRACKING_ATTR = "data-profile-interaction-like-id";
+const PROFILE_TAB_OPTIONS = ["About", "Friends", "Photos", "Reels"];
+const PROFILE_TAB_BROWSE_MS = 5000;
 const INITIAL_SCROLL_MIN_MS = 10000;
 const INITIAL_SCROLL_MAX_MS = 20000;
 const COLLECT_INTERVAL_MS = 2000; // snapshot DOM every 2s while scrolling
 const INTERACTION_WAIT_MIN_MS = 10000;
 const INTERACTION_WAIT_MAX_MS = 17000;
+
+async function findProfileTab(page, label) {
+  return page.evaluate((targetLabel) => {
+    const tabs = Array.from(document.querySelectorAll('[role="tab"]'));
+    const normalizedTarget = targetLabel.toLowerCase();
+
+    for (const tab of tabs) {
+      const text = (tab.textContent || "").replace(/\s+/g, " ").trim();
+      const href = tab.getAttribute("href") || "";
+
+      if (normalizedTarget === "all") {
+        const isAllTab =
+          text.toLowerCase() === "all" &&
+          !/[?&]sk=/.test(href) &&
+          !href.includes("reels_tab");
+
+        if (!isAllTab) continue;
+      } else if (text.toLowerCase() !== normalizedTarget) {
+        continue;
+      }
+
+      const rect = tab.getBoundingClientRect();
+      return {
+        found: true,
+        text,
+        href,
+        pageY: window.scrollY + rect.y,
+        box: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+      };
+    }
+
+    return { found: false };
+  }, label);
+}
+
+async function clickProfileTab(page, label) {
+  // Profile tabs live near the top header area, so re-anchor there first.
+  await humanScrollTo(page, 0);
+  await page.waitForTimeout(randomInt(350, 700));
+
+  const info = await findProfileTab(page, label);
+  if (!info.found || !info.box) {
+    console.log(`[profile-interaction] Tab "${label}" not found.`);
+    return false;
+  }
+
+  await humanScrollTo(page, info.pageY);
+  await page.waitForTimeout(randomInt(250, 600));
+
+  const refreshed = await findProfileTab(page, label);
+  if (!refreshed.found || !refreshed.box) {
+    console.log(`[profile-interaction] Tab "${label}" disappeared before click.`);
+    return false;
+  }
+
+  const clickResult = await page.evaluate(
+    ({ targetLabel }) => {
+      const tabs = Array.from(document.querySelectorAll('[role="tab"]'));
+      const normalizedTarget = targetLabel.toLowerCase();
+
+      for (const tab of tabs) {
+        const text = (tab.textContent || "").replace(/\s+/g, " ").trim();
+        const href = tab.getAttribute("href") || "";
+
+        if (normalizedTarget === "all") {
+          const isAllTab =
+            text.toLowerCase() === "all" &&
+            !/[?&]sk=/.test(href) &&
+            !href.includes("reels_tab");
+
+          if (!isAllTab) continue;
+        } else if (text.toLowerCase() !== normalizedTarget) {
+          continue;
+        }
+
+        tab.click();
+        return { clicked: true, text, href };
+      }
+
+      return { clicked: false };
+    },
+    { targetLabel: label },
+  );
+
+  if (!clickResult.clicked) {
+    const cx = refreshed.box.x + refreshed.box.width / 2;
+    const cy = refreshed.box.y + refreshed.box.height / 2;
+    await page.mouse.click(cx, cy, { delay: randomInt(40, 120) });
+    console.log(`[profile-interaction] Opened "${refreshed.text}" tab by mouse.`);
+    return true;
+  }
+
+  console.log(`[profile-interaction] Opened "${clickResult.text}" tab.`);
+  return true;
+}
+
+async function browseRandomProfileTab(page) {
+  const chosenLabel =
+    PROFILE_TAB_OPTIONS[randomInt(0, PROFILE_TAB_OPTIONS.length - 1)];
+  console.log(
+    `[profile-interaction] Visiting random profile tab: "${chosenLabel}"`,
+  );
+
+  const opened = await clickProfileTab(page, chosenLabel);
+  if (!opened) {
+    return;
+  }
+
+  await page.waitForLoadState("domcontentloaded").catch(() => {});
+  await page.waitForTimeout(randomInt(700, 1200));
+  await scrollForDuration(page, PROFILE_TAB_BROWSE_MS);
+  await page.waitForTimeout(randomInt(400, 800));
+
+  const backToAll = await clickProfileTab(page, "All");
+  if (backToAll) {
+    await page.waitForLoadState("domcontentloaded").catch(() => {});
+    await page.waitForTimeout(randomInt(700, 1200));
+  }
+}
+
+async function findAddFriendPosition(page) {
+  return page.evaluate(() => {
+    const candidates = Array.from(
+      document.querySelectorAll('button, div[role="button"], a[role="button"]'),
+    );
+
+    for (const el of candidates) {
+      const aria = (el.getAttribute("aria-label") || "").trim();
+      if (!aria.toLowerCase().includes("add friend")) continue;
+
+      const rect = el.getBoundingClientRect();
+      return {
+        found: true,
+        text: (el.textContent || "").trim(),
+        ariaLabel: aria,
+        pageY: window.scrollY + rect.y,
+      };
+    }
+
+    return { found: false };
+  });
+}
+
+async function getAddFriendBox(page) {
+  return page.evaluate(() => {
+    const candidates = Array.from(
+      document.querySelectorAll('button, div[role="button"], a[role="button"]'),
+    );
+
+    for (const el of candidates) {
+      const aria = (el.getAttribute("aria-label") || "").trim();
+      if (!aria.toLowerCase().includes("add friend")) continue;
+
+      const rect = el.getBoundingClientRect();
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    }
+
+    return null;
+  });
+}
+
+async function addFriendAfterInteraction(page) {
+  console.log("[profile-interaction] Interaction pass complete. Preparing Add Friend.");
+  await humanScrollTo(page, 0);
+  await page.waitForTimeout(randomInt(600, 1200));
+
+  const info = await findAddFriendPosition(page);
+  if (!info.found) {
+    console.log("[profile-interaction] Add Friend button not found.");
+    return;
+  }
+
+  console.log(
+    `[profile-interaction] Found Add Friend at pageY=${info.pageY}, aria="${info.ariaLabel}"`,
+  );
+
+  await humanScrollTo(page, info.pageY);
+  await page.waitForTimeout(randomInt(300, 700));
+
+  const box = await getAddFriendBox(page);
+  if (!box) {
+    console.log("[profile-interaction] Add Friend button lost after scroll.");
+    return;
+  }
+
+  try {
+    const cx = box.x + box.width / 2;
+    const cy = box.y + box.height / 2;
+    await page.mouse.click(cx, cy, { delay: randomInt(40, 120) });
+    console.log(
+      `[profile-interaction] Clicked Add Friend, text="${info.text}"`,
+    );
+  } catch (err) {
+    console.log(`[profile-interaction] Add Friend click failed: ${err.message}`);
+  }
+}
 
 // ---------- tag any untagged Like elements currently in DOM ----------
 
@@ -103,6 +301,9 @@ async function runProfileInteraction(page, data) {
   const targetUrl = (data && data.url) || getRandomProfileUrl();
   console.log(`[profile-interaction] Target profile: ${targetUrl}`);
   await ensureUrl(page, targetUrl);
+  await page.waitForTimeout(randomInt(800, 1400));
+
+  await browseRandomProfileTab(page);
 
   // scroll and collect targets simultaneously
   const scrollMs = randomInt(INITIAL_SCROLL_MIN_MS, INITIAL_SCROLL_MAX_MS);
@@ -256,6 +457,8 @@ async function runProfileInteraction(page, data) {
       await sleep(waitMs);
     }
   }
+
+  await addFriendAfterInteraction(page);
 }
 
 module.exports = runProfileInteraction;

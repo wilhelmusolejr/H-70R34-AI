@@ -8,20 +8,24 @@
 //   const message = await generateShareMessage(userIdentity, postContext);
 //
 // Required env vars:
-//   GITHUB_MODELS_TOKEN        — GitHub personal access token with Models access
-//   GITHUB_MODELS_MODEL        — model name (default: openai/gpt-4.1)
-//   GITHUB_MODELS_BASE_URL     — API endpoint (default: https://models.github.ai/inference/chat/completions)
-//   GITHUB_MODELS_API_VERSION  — API version header (default: 2026-03-10)
+//   GITHUB_MODELS_TOKEN        - GitHub personal access token with Models access
+//   GITHUB_MODELS_MODEL        - model name (default: openai/gpt-4.1)
+//   GITHUB_MODELS_BASE_URL     - API endpoint (default: https://models.github.ai/inference/chat/completions)
+//   GITHUB_MODELS_API_VERSION  - API version header (default: 2026-03-10)
 //
 // Returns:
-//   A plain string — the share message only, ready to be typed into the
+//   A plain string - the share message only, ready to be typed into the
 //   Facebook share dialog. Empty string on failure (share proceeds silently).
 
 require("dotenv").config();
 
 async function requestGitHubModels(messages, options = {}) {
-  const token = String(process.env.GITHUB_MODELS_TOKEN || process.env.GITHUB_TOKEN || "").trim();
-  const model = String(process.env.GITHUB_MODELS_MODEL || "openai/gpt-4.1").trim();
+  const token = String(
+    process.env.GITHUB_MODELS_TOKEN || process.env.GITHUB_TOKEN || "",
+  ).trim();
+  const model = String(
+    process.env.GITHUB_MODELS_MODEL || "openai/gpt-4.1",
+  ).trim();
   const endpoint = String(
     process.env.GITHUB_MODELS_BASE_URL ||
       "https://models.github.ai/inference/chat/completions",
@@ -69,10 +73,12 @@ async function requestGitHubModels(messages, options = {}) {
 
 async function generateShareMessage(userIdentity, postContext) {
   try {
+    const systemPrompt = `You are ${userIdentity}. Write a short, natural Facebook share message for the post described below. It should sound casual and human, not polished or AI-written. Avoid em dashes, long hyphens used like em dashes, corporate phrasing, and overly perfect grammar. Prefer simple everyday wording. Return only the message text, with no quotes, no explanation, and no hashtags unless they feel natural for this person.`;
+
     const { payload } = await requestGitHubModels([
       {
         role: "system",
-        content: `You are ${userIdentity}. Write a short, natural Facebook share message for the post described below. Return only the message text — no quotes, no explanation, no hashtags unless they feel natural for this person.`,
+        content: systemPrompt,
       },
       {
         role: "user",

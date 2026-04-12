@@ -4,19 +4,21 @@ const runTestScript = require("./steps/test-script");
 const runHomepageInteraction = require("./steps/homepage-interaction");
 const runAddingFriendStep = require("./steps/adding-friend-step");
 const runProfileInteraction = require("./steps/profile-interaction");
+const runSearchInteraction = require("./steps/search-interaction");
 
 const PROFILE_UUID = "local-cb754975-1f0f-49d9-a6ea-ae56b6175dd0";
 const KEEP_PROFILE_OPEN = true;
 const REUSE_CURRENT_TAB = true;
 const START_URL = "https://www.facebook.com/";
 const OPEN_START_URL_WHEN_BLANK = true;
-const STEP_KEY = process.env.STEP_KEY || "homepage_interaction";
+const STEP_KEY = process.env.STEP_KEY || "search_interaction";
 
 const STEP_RUNNERS = {
   test_script: runTestScript,
   homepage_interaction: runHomepageInteraction,
   adding_friend: runAddingFriendStep,
   profile_interaction: runProfileInteraction,
+  search_interaction: runSearchInteraction,
 };
 
 async function getWorkingPage(context) {
@@ -26,13 +28,26 @@ async function getWorkingPage(context) {
     return context.newPage();
   }
 
+  const isAutomatablePage = (page) => {
+    const url = page.url() || "about:blank";
+    return (
+      url === "about:blank" ||
+      url.startsWith("http://") ||
+      url.startsWith("https://")
+    );
+  };
+
+  const automatablePages = pages.filter(isAutomatablePage);
+
   if (!REUSE_CURRENT_TAB) {
-    return pages[0];
+    return automatablePages[0] || context.newPage();
   }
 
-  // Reuse any non-blank page so we can test against current browser state.
-  const nonBlankPage = pages.find((p) => p.url() && p.url() !== "about:blank");
-  return nonBlankPage || pages[0];
+  // Reuse a normal web tab, not devtools:// or other browser-internal pages.
+  const nonBlankWebPage = automatablePages.find(
+    (p) => p.url() && p.url() !== "about:blank",
+  );
+  return nonBlankWebPage || automatablePages[0] || context.newPage();
 }
 
 async function ensureStartPage(page) {

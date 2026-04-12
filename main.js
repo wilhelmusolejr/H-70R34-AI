@@ -1,6 +1,6 @@
 // multi-profile.js
 // Usage:
-//   node multi-profile.js --task add_friend --url https://facebook.com/someone --uuids uuid1,uuid2,uuid3
+//   node multi-profile.js --task profile_interaction --url https://facebook.com/someone --uuids uuid1,uuid2,uuid3
 //   node multi-profile.js --task homepage_interaction --uuids uuid1,uuid2,uuid3,uuid4,uuid5
 //
 // Each profile runs: random filler → main task → random filler
@@ -22,11 +22,6 @@ const FILLER_STEPS = {
 };
 
 const MAIN_TASKS = {
-  add_friend: {
-    module: require("./steps/adding-friend-step"),
-    label: "Add Friend",
-    requiredData: ["url"],
-  },
   homepage_interaction: {
     module: require("./steps/homepage-interaction"),
     label: "Facebook Homepage Interaction",
