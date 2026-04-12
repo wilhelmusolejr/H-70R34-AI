@@ -1,15 +1,21 @@
 // profile-interaction.js
-const { randomInt, scrollForDuration, shuffle, sleep, humanScrollTo } = require("./utils/scroll-utils");
+const {
+  randomInt,
+  scrollForDuration,
+  shuffle,
+  sleep,
+  humanScrollTo,
+} = require("./utils/scroll-utils");
 const { ensureUrl } = require("./utils/navigation");
 const { getRandomProfileUrl } = require("../data/profile-urls");
 
 const LIKE_SELECTOR = 'div[aria-label="Like"]';
 const LIKE_TRACKING_ATTR = "data-profile-interaction-like-id";
-const INITIAL_SCROLL_MIN_MS = 20000;
-const INITIAL_SCROLL_MAX_MS = 40000;
+const INITIAL_SCROLL_MIN_MS = 10000;
+const INITIAL_SCROLL_MAX_MS = 20000;
 const COLLECT_INTERVAL_MS = 2000; // snapshot DOM every 2s while scrolling
 const INTERACTION_WAIT_MIN_MS = 10000;
-const INTERACTION_WAIT_MAX_MS = 15000;
+const INTERACTION_WAIT_MAX_MS = 17000;
 
 // ---------- tag any untagged Like elements currently in DOM ----------
 
