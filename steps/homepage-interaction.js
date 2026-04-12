@@ -1,4 +1,18 @@
 // homepage-interaction.js
+//
+// Flow:
+//   1. ensureUrl — navigate to facebook.com if not already there (origin-only match)
+//   2. Initial scroll — browse the feed for 10–20 s to simulate a real user reading
+//   3. Scroll to top, then collection pass — crawl feed top-to-bottom, recording
+//      the pageY of every Like button (deduped by 50 px buckets)
+//   4. Shuffle collected targets, select a random half to like
+//   5. Pick 1–3 random posts from that half to share
+//   6. Pass 2 — scroll to each selected target:
+//        a. Click the Like button closest to the viewport centre
+//        b. If this post was chosen for sharing: open the share modal,
+//           optionally type SHARE_MESSAGE, then click Share now
+//        c. Wait 10–20 s between interactions
+//
 const { randomInt, scrollForDuration, shuffle, sleep, humanScrollTo } = require("./utils/scroll-utils");
 const { ensureUrl } = require("./utils/navigation");
 
@@ -8,7 +22,9 @@ const SHARE_BUTTON_SELECTOR =
 const SHARE_NOW_SELECTOR = '[aria-label="Share now"]';
 const SHARE_TEXTBOX_SELECTOR =
   'div[role="dialog"] div[contenteditable="true"][role="textbox"]';
-const SHARE_MESSAGE = "lovely post! :)";
+const SHARE_MESSAGE = "";
+const SHARE_COUNT_MIN = 1;
+const SHARE_COUNT_MAX = 3;
 const SCROLL_DURATION_MIN_MS = 10000;
 const SCROLL_DURATION_MAX_MS = 20000;
 const LOG_INTERVAL_MIN_MS = 10000;
@@ -124,14 +140,16 @@ async function sharePost(page, targetPageY) {
   }
   await page.waitForTimeout(randomInt(800, 1500));
 
-  // type the message in the textbox
-  try {
-    await page.waitForSelector(SHARE_TEXTBOX_SELECTOR, { timeout: 3000 });
-    await humanType(page, SHARE_TEXTBOX_SELECTOR, SHARE_MESSAGE);
-    console.log(`[fb-interact] Typed share message: "${SHARE_MESSAGE}"`);
-  } catch {
-    console.log("[fb-interact] Share textbox not found in modal.");
-    return false;
+  // type the message in the textbox (skip if message is empty)
+  if (SHARE_MESSAGE) {
+    try {
+      await page.waitForSelector(SHARE_TEXTBOX_SELECTOR, { timeout: 3000 });
+      await humanType(page, SHARE_TEXTBOX_SELECTOR, SHARE_MESSAGE);
+      console.log(`[fb-interact] Typed share message: "${SHARE_MESSAGE}"`);
+    } catch {
+      console.log("[fb-interact] Share textbox not found in modal.");
+      return false;
+    }
   }
 
   await page.waitForTimeout(randomInt(500, 1000));
@@ -196,10 +214,17 @@ async function runHomepageInteraction(page) {
   );
   console.log(`[fb-interact] Clicking ${selected.length} random targets.`);
 
-  // pick 1 random target from the selected half to share
-  const shareTargetIndex = randomInt(0, selected.length - 1);
+  // pick 1–3 random targets from the selected half to share
+  const shareCount = Math.min(
+    randomInt(SHARE_COUNT_MIN, SHARE_COUNT_MAX),
+    selected.length,
+  );
+  const shareIndexes = new Set();
+  while (shareIndexes.size < shareCount) {
+    shareIndexes.add(randomInt(0, selected.length - 1));
+  }
   console.log(
-    `[fb-interact] Will share post at index ${shareTargetIndex} (pageY≈${selected[shareTargetIndex].pageY})`,
+    `[fb-interact] Will share ${shareCount} post(s) at indexes: ${[...shareIndexes].join(", ")}`,
   );
 
   // pass 2: scroll to each target and click
@@ -254,8 +279,8 @@ async function runHomepageInteraction(page) {
       );
     }
 
-    // share this post if it's the chosen one
-    if (i === shareTargetIndex) {
+    // share this post if it's one of the chosen ones
+    if (shareIndexes.has(i)) {
       await page.waitForTimeout(randomInt(1000, 2000));
       await sharePost(page, target.pageY);
     }
