@@ -15,6 +15,12 @@
 //
 const { randomInt, scrollForDuration, shuffle, sleep, humanScrollTo } = require("./utils/scroll-utils");
 const { ensureUrl } = require("./utils/navigation");
+const { generateShareMessage } = require("./utils/generate-share-message");
+
+// Who the automation is acting as — used as the AI persona when generating messages
+const USER_IDENTITY = "a regular Facebook user who enjoys sharing interesting posts";
+// What kind of content is being shared — gives the AI context for the message tone
+const POST_CONTEXT = "a post from my Facebook feed";
 
 const LIKE_SELECTOR = 'div[aria-label="Like"]';
 const SHARE_BUTTON_SELECTOR =
@@ -22,7 +28,6 @@ const SHARE_BUTTON_SELECTOR =
 const SHARE_NOW_SELECTOR = '[aria-label="Share now"]';
 const SHARE_TEXTBOX_SELECTOR =
   'div[role="dialog"] div[contenteditable="true"][role="textbox"]';
-const SHARE_MESSAGE = "";
 const SHARE_COUNT_MIN = 1;
 const SHARE_COUNT_MAX = 3;
 const SCROLL_DURATION_MIN_MS = 10000;
@@ -88,7 +93,7 @@ async function humanType(page, selector, text) {
 
 // ---------- share a post ----------
 
-async function sharePost(page, targetPageY) {
+async function sharePost(page, targetPageY, message) {
   // scroll to the post
   await humanScrollTo(page, targetPageY);
   await page.waitForTimeout(randomInt(400, 800));
@@ -141,11 +146,11 @@ async function sharePost(page, targetPageY) {
   await page.waitForTimeout(randomInt(800, 1500));
 
   // type the message in the textbox (skip if message is empty)
-  if (SHARE_MESSAGE) {
+  if (message) {
     try {
       await page.waitForSelector(SHARE_TEXTBOX_SELECTOR, { timeout: 3000 });
-      await humanType(page, SHARE_TEXTBOX_SELECTOR, SHARE_MESSAGE);
-      console.log(`[fb-interact] Typed share message: "${SHARE_MESSAGE}"`);
+      await humanType(page, SHARE_TEXTBOX_SELECTOR, message);
+      console.log(`[fb-interact] Typed share message: "${message}"`);
     } catch {
       console.log("[fb-interact] Share textbox not found in modal.");
       return false;
@@ -282,7 +287,8 @@ async function runHomepageInteraction(page) {
     // share this post if it's one of the chosen ones
     if (shareIndexes.has(i)) {
       await page.waitForTimeout(randomInt(1000, 2000));
-      await sharePost(page, target.pageY);
+      const message = await generateShareMessage(USER_IDENTITY, POST_CONTEXT);
+      await sharePost(page, target.pageY, message);
     }
 
     if (i < selected.length - 1) {
