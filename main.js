@@ -6,38 +6,43 @@
 // Each profile runs: random filler → main task → random filler
 // Profiles start with staggered delays so they don't all hit Facebook at the same instant.
 
+const fs = require("fs");
+const path = require("path");
 const { openProfile, closeProfile } = require("./hidemium");
 
-// ---------- step registry (same as single-profile.js) ----------
+// ---------- step registry ----------
 
-const FILLER_STEPS = {
-  profile_interaction: {
-    module: require("./steps/profile-interaction"),
-    label: "Profile Interaction",
-  },
-  search_interaction: {
-    module: require("./steps/search-interaction"),
-    label: "Search Interaction",
-  },
-};
-
+// MAIN_TASKS: the tasks that can be chosen as the primary task via --task flag.
+// These are explicitly registered so we can validate --task and pass the right data.
 const MAIN_TASKS = {
   homepage_interaction: {
     module: require("./steps/homepage-interaction"),
     label: "Homepage Interaction",
-    requiredData: [],
   },
   profile_interaction: {
     module: require("./steps/profile-interaction"),
     label: "Profile Interaction",
-    requiredData: [],
   },
   search_interaction: {
     module: require("./steps/search-interaction"),
     label: "Search Interaction",
-    requiredData: [],
   },
 };
+
+// FILLER_STEPS: auto-discovered from steps/ — any .js added there becomes a filler candidate.
+// test-script.js is always excluded; the chosen main task file is excluded at runtime.
+const EXCLUDED_FROM_FILLERS = new Set(["test-script.js"]);
+
+const ALL_FILLER_STEPS = fs
+  .readdirSync(path.join(__dirname, "steps"))
+  .filter((f) => f.endsWith(".js") && !EXCLUDED_FROM_FILLERS.has(f))
+  .map((f) => ({
+    label: f.replace(".js", ""),
+    file: f,
+    fn: require(path.join(__dirname, "steps", f)),
+  }));
+
+console.log(`[multi] Filler pool: ${ALL_FILLER_STEPS.map((s) => s.label).join(", ")}\n`);
 
 // ---------- helpers ----------
 
@@ -49,8 +54,9 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function pickRandomFillers(mainTaskKey, count) {
-  const available = Object.keys(FILLER_STEPS).filter((k) => k !== mainTaskKey);
+// Exclude the main task's file from filler candidates so it isn't run twice.
+function pickRandomFillers(mainTaskFile, count) {
+  const available = ALL_FILLER_STEPS.filter((s) => s.file !== mainTaskFile);
   const shuffled = [...available].sort(() => Math.random() - 0.5);
   return shuffled.slice(0, Math.min(count, shuffled.length));
 }
@@ -82,12 +88,15 @@ async function runOneProfile(profileUuid, mainTaskKey, taskData, profileIndex) {
 
   console.log(`${tag} Attached to: ${page.url() || "about:blank"}`);
 
+  // derive the filename used to exclude this task from fillers
+  const mainTaskFile = mainTaskKey.replace(/_/g, "-") + ".js";
+
   try {
     // --- random filler(s) before ---
-    const beforeSteps = pickRandomFillers(mainTaskKey, randomInt(1, 2));
-    for (const stepKey of beforeSteps) {
-      console.log(`${tag} Filler: ${FILLER_STEPS[stepKey].label}`);
-      await FILLER_STEPS[stepKey].module(page, null);
+    const beforeSteps = pickRandomFillers(mainTaskFile, randomInt(1, 2));
+    for (const step of beforeSteps) {
+      console.log(`${tag} Filler: ${step.label}`);
+      await step.fn(page, null);
       await sleep(randomInt(3000, 8000));
     }
 
@@ -97,10 +106,10 @@ async function runOneProfile(profileUuid, mainTaskKey, taskData, profileIndex) {
     await sleep(randomInt(3000, 8000));
 
     // --- random filler(s) after ---
-    const afterSteps = pickRandomFillers(mainTaskKey, randomInt(1, 2));
-    for (const stepKey of afterSteps) {
-      console.log(`${tag} Filler: ${FILLER_STEPS[stepKey].label}`);
-      await FILLER_STEPS[stepKey].module(page, null);
+    const afterSteps = pickRandomFillers(mainTaskFile, randomInt(1, 2));
+    for (const step of afterSteps) {
+      console.log(`${tag} Filler: ${step.label}`);
+      await step.fn(page, null);
       await sleep(randomInt(3000, 8000));
     }
 

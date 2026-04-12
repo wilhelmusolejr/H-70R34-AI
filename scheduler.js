@@ -14,10 +14,10 @@
 
 require("dotenv").config();
 
+const fs = require("fs");
+const path = require("path");
 const { openProfile, closeProfile } = require("./hidemium");
 const runHomepageInteraction = require("./steps/homepage-interaction");
-const runProfileInteraction = require("./steps/profile-interaction");
-const runSearchInteraction = require("./steps/search-interaction");
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -28,7 +28,8 @@ const PROFILE_UUIDS = [
 ];
 
 const MAIN_TASK = runHomepageInteraction;
-const MAIN_TASK_LABEL = "homepage_interaction";
+const MAIN_TASK_FILE = "homepage-interaction.js";
+const MAIN_TASK_LABEL = MAIN_TASK_FILE.replace(".js", "");
 
 const MAX_CONCURRENT = 3; // how many profiles run at the same time
 
@@ -53,12 +54,21 @@ function timestamp() {
   return new Date().toLocaleString();
 }
 
-// ─── Filler pool (excludes main task and test scripts) ───────────────────────
+// ─── Filler pool — auto-discovered from steps/ ───────────────────────────────
+// Any .js file added to the steps/ folder is automatically a filler candidate.
+// Only test-script.js and the main task file are excluded.
 
-const FILLER_STEPS = [
-  { label: "profile_interaction", fn: runProfileInteraction },
-  { label: "search_interaction", fn: runSearchInteraction },
-];
+const EXCLUDED_FROM_FILLERS = new Set(["test-script.js", MAIN_TASK_FILE]);
+
+const FILLER_STEPS = fs
+  .readdirSync(path.join(__dirname, "steps"))
+  .filter((f) => f.endsWith(".js") && !EXCLUDED_FROM_FILLERS.has(f))
+  .map((f) => ({
+    label: f.replace(".js", ""),
+    fn: require(path.join(__dirname, "steps", f)),
+  }));
+
+console.log(`[scheduler] Filler pool: ${FILLER_STEPS.map((s) => s.label).join(", ")}\n`);
 
 function pickFillers(count) {
   const shuffled = [...FILLER_STEPS].sort(() => Math.random() - 0.5);
