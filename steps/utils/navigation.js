@@ -1,5 +1,22 @@
 // navigation.js — shared "navigate only if needed" helper
 
+const NAV_RETRIES = 5;   // max retries for general navigation errors (proxy, connection)
+const TIMEOUT_RETRIES = 10; // max retries for timeout errors (slow proxy)
+const RETRY_WAIT_MS = 5000; // wait between retries
+
+function isTimeoutError(err) {
+  const msg = err.message || "";
+  return (
+    msg.includes("Timeout") ||
+    msg.includes("timeout") ||
+    msg.includes("TimeoutError")
+  );
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function urlMatches(currentUrl, targetUrl, matchOriginOnly) {
   try {
     const current = new URL(currentUrl);
@@ -28,9 +45,34 @@ async function ensureUrl(page, targetUrl, options = {}) {
     return;
   }
 
-  await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
-  await page.waitForLoadState("networkidle").catch(() => {});
-  console.log(`[nav] Navigated to ${targetUrl}`);
+  let lastErr;
+
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
+      await page.waitForLoadState("networkidle").catch(() => {});
+      console.log(`[nav] Navigated to ${targetUrl}`);
+      return;
+    } catch (err) {
+      lastErr = err;
+
+      const maxRetries = isTimeoutError(err) ? TIMEOUT_RETRIES : NAV_RETRIES;
+      const kind = isTimeoutError(err) ? "timeout" : "navigation error";
+
+      if (attempt >= maxRetries) {
+        console.error(
+          `[nav] ${kind} — all ${maxRetries} retries exhausted for ${targetUrl}: ${err.message}`,
+        );
+        throw err;
+      }
+
+      console.warn(
+        `[nav] ${kind} (attempt ${attempt}/${maxRetries}) for ${targetUrl}: ${err.message}`,
+      );
+      console.warn(`[nav] Retrying in ${RETRY_WAIT_MS / 1000}s...`);
+      await sleep(RETRY_WAIT_MS);
+    }
+  }
 }
 
 module.exports = { ensureUrl };
