@@ -1,5 +1,6 @@
 // facebook-homepage-interaction.js
 const { randomInt, scrollForDuration } = require("./utils/scroll-utils");
+const { ensureUrl } = require("./utils/navigation");
 
 const LIKE_SELECTOR = 'div[aria-label="Like"]';
 const SHARE_BUTTON_SELECTOR =
@@ -212,7 +213,7 @@ async function sharePost(page, targetPageY) {
 // ---------- main routine ----------
 
 async function runFacebookHomepageInteraction(page) {
-  await page.waitForLoadState("domcontentloaded").catch(() => {});
+  await ensureUrl(page, "https://www.facebook.com/", { matchOriginOnly: true });
 
   // initial human-like browsing scroll
   const scrollMs = randomInt(SCROLL_DURATION_MIN_MS, SCROLL_DURATION_MAX_MS);

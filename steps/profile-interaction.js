@@ -1,5 +1,7 @@
 // profile-interaction.js
 const { randomInt, scrollForDuration } = require("./utils/scroll-utils");
+const { ensureUrl } = require("./utils/navigation");
+const { getRandomProfileUrl } = require("../data/profile-urls");
 
 const LIKE_SELECTOR = 'div[aria-label="Like"]';
 const LIKE_TRACKING_ATTR = "data-profile-interaction-like-id";
@@ -139,8 +141,10 @@ async function getTaggedElementBox(page, targetId) {
 
 // ---------- main routine ----------
 
-async function runProfileInteraction(page) {
-  await page.waitForLoadState("domcontentloaded").catch(() => {});
+async function runProfileInteraction(page, data) {
+  const targetUrl = (data && data.url) || getRandomProfileUrl();
+  console.log(`[profile-interaction] Target profile: ${targetUrl}`);
+  await ensureUrl(page, targetUrl);
 
   // scroll and collect targets simultaneously
   const scrollMs = randomInt(INITIAL_SCROLL_MIN_MS, INITIAL_SCROLL_MAX_MS);

@@ -1,9 +1,8 @@
 // adding-friend-step.js
 const { randomInt, scrollForDuration } = require("./utils/scroll-utils");
+const { ensureUrl } = require("./utils/navigation");
+const { getRandomProfileUrl } = require("../data/profile-urls");
 
-const PROFILE_URL =
-  process.env.FACEBOOK_PROFILE_URL ||
-  "https://www.facebook.com/profile.php?id=61579261859747";
 const PRECHECK_SCROLL_MIN_MS = 10000;
 const PRECHECK_SCROLL_MAX_MS = 20000;
 
@@ -97,16 +96,13 @@ async function humanScrollTo(page, targetPageY) {
 
 // ---------- main routine ----------
 
-async function runAddingFriendStep(page) {
-  if (!PROFILE_URL || !PROFILE_URL.startsWith("http")) {
-    throw new Error(
-      "Set FACEBOOK_PROFILE_URL (full https URL) before running.",
-    );
-  }
-
-  await page.goto(PROFILE_URL, { waitUntil: "domcontentloaded" });
-  await page.waitForLoadState("networkidle").catch(() => {});
-  console.log(`[adding_friend] Opened profile: ${PROFILE_URL}`);
+async function runAddingFriendStep(page, data) {
+  const targetUrl =
+    (data && data.url) ||
+    process.env.FACEBOOK_PROFILE_URL ||
+    getRandomProfileUrl();
+  console.log(`[adding_friend] Target profile: ${targetUrl}`);
+  await ensureUrl(page, targetUrl);
 
   // human-like browse before interacting
   const precheckMs = randomInt(PRECHECK_SCROLL_MIN_MS, PRECHECK_SCROLL_MAX_MS);
