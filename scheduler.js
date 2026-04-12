@@ -22,9 +22,8 @@ const runProfileInteraction = require("./steps/profile-interaction");
 
 // Add all profile UUIDs that should run every day
 const PROFILE_UUIDS = [
+  "local-7ffc7c92-2399-481e-821c-f6d0724ef55a",
   "local-cb754975-1f0f-49d9-a6ea-ae56b6175dd0",
-  // "local-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-  // add more...
 ];
 
 const MAIN_TASK = runHomepageInteraction;
@@ -112,7 +111,9 @@ async function runOneProfile(uuid, index) {
 
 async function runAllProfiles() {
   console.log(`\n[scheduler] ${timestamp()} — Starting daily run`);
-  console.log(`[scheduler] ${PROFILE_UUIDS.length} profile(s), max ${MAX_CONCURRENT} concurrent\n`);
+  console.log(
+    `[scheduler] ${PROFILE_UUIDS.length} profile(s), max ${MAX_CONCURRENT} concurrent\n`,
+  );
 
   const queue = [...PROFILE_UUIDS];
   const running = new Set();
@@ -125,7 +126,9 @@ async function runAllProfiles() {
 
     if (currentIndex > 0) {
       const staggerMs = randomInt(5000, 15000);
-      console.log(`[scheduler] Staggering profile ${currentIndex + 1} by ${(staggerMs / 1000).toFixed(1)}s...`);
+      console.log(
+        `[scheduler] Staggering profile ${currentIndex + 1} by ${(staggerMs / 1000).toFixed(1)}s...`,
+      );
       await sleep(staggerMs);
     }
 
