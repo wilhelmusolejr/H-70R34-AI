@@ -1,54 +1,86 @@
 // generate-share-message.js
 //
-// Calls the GitHub Models API (OpenAI-compatible) to generate a Facebook
-// share post message based on the user's identity and the post context.
+// Calls the GitHub Models API to generate a Facebook share post message
+// based on the user's identity and the post context.
 //
 // Usage:
 //   const { generateShareMessage } = require("./utils/generate-share-message");
 //   const message = await generateShareMessage(userIdentity, postContext);
 //
-// Required env var:
-//   GITHUB_TOKEN — your GitHub personal access token with Models access
+// Required env vars:
+//   GITHUB_MODELS_TOKEN        — GitHub personal access token with Models access
+//   GITHUB_MODELS_MODEL        — model name (default: openai/gpt-4.1)
+//   GITHUB_MODELS_BASE_URL     — API endpoint (default: https://models.github.ai/inference/chat/completions)
+//   GITHUB_MODELS_API_VERSION  — API version header (default: 2026-03-10)
 //
 // Returns:
 //   A plain string — the share message only, ready to be typed into the
 //   Facebook share dialog. Empty string on failure (share proceeds silently).
 
-const OpenAI = require("openai");
+require("dotenv").config();
 
-const GITHUB_MODELS_BASE_URL = "https://models.inference.ai.azure.com";
-const MODEL = "gpt-4o-mini";
+async function requestGitHubModels(messages, options = {}) {
+  const token = String(process.env.GITHUB_MODELS_TOKEN || process.env.GITHUB_TOKEN || "").trim();
+  const model = String(process.env.GITHUB_MODELS_MODEL || "openai/gpt-4.1").trim();
+  const endpoint = String(
+    process.env.GITHUB_MODELS_BASE_URL ||
+      "https://models.github.ai/inference/chat/completions",
+  ).trim();
+  const apiVersion = String(
+    process.env.GITHUB_MODELS_API_VERSION || "2026-03-10",
+  ).trim();
 
-async function generateShareMessage(userIdentity, postContext) {
-  const token = process.env.GITHUB_TOKEN;
   if (!token) {
-    console.warn(
-      "[generate-share-message] GITHUB_TOKEN not set, returning empty message.",
-    );
-    return "";
+    throw new Error("Missing GITHUB_MODELS_TOKEN in environment.");
   }
 
-  const client = new OpenAI({
-    baseURL: GITHUB_MODELS_BASE_URL,
-    apiKey: token,
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      "X-GitHub-Api-Version": apiVersion,
+    },
+    body: JSON.stringify({
+      model,
+      temperature: options.temperature ?? 0.8,
+      max_tokens: options.maxTokens ?? 100,
+      messages,
+    }),
   });
 
-  const systemPrompt = `You are ${userIdentity}. Write a short, natural Facebook share message for the post described below. Return only the message text — no quotes, no explanation, no hashtags unless they feel natural for this person.`;
+  if (!response.ok) {
+    let errorMessage = "GitHub Models request failed.";
+    try {
+      const body = await response.json();
+      errorMessage = body?.message || body?.error?.message || errorMessage;
+    } catch {
+      // ignore body parse failures
+    }
+    throw new Error(errorMessage);
+  }
 
-  const userPrompt = `Post context:\n${postContext}`;
+  return {
+    model,
+    payload: await response.json(),
+  };
+}
 
+async function generateShareMessage(userIdentity, postContext) {
   try {
-    const response = await client.chat.completions.create({
-      model: MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      temperature: 0.9,
-      max_tokens: 100,
-    });
+    const { payload } = await requestGitHubModels([
+      {
+        role: "system",
+        content: `You are ${userIdentity}. Write a short, natural Facebook share message for the post described below. Return only the message text — no quotes, no explanation, no hashtags unless they feel natural for this person.`,
+      },
+      {
+        role: "user",
+        content: `Post context:\n${postContext}`,
+      },
+    ]);
 
-    const message = response.choices[0]?.message?.content?.trim() ?? "";
+    const message = payload.choices[0]?.message?.content?.trim() ?? "";
     console.log(`[generate-share-message] Generated: "${message}"`);
     return message;
   } catch (err) {
