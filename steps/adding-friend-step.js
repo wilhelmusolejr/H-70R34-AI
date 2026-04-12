@@ -1,5 +1,5 @@
 // adding-friend-step.js
-const { randomInt, scrollForDuration } = require("./utils/scroll-utils");
+const { randomInt, scrollForDuration, humanScrollTo } = require("./utils/scroll-utils");
 const { ensureUrl } = require("./utils/navigation");
 const { getRandomProfileUrl } = require("../data/profile-urls");
 
@@ -52,46 +52,6 @@ async function getAddFriendBox(page) {
 
     return null;
   });
-}
-
-// ---------- human scroll to a page-Y coordinate (handles up + down) ----------
-
-async function humanScrollTo(page, targetPageY) {
-  const viewport = await page.evaluate(() => ({
-    scrollY: window.scrollY,
-    innerHeight: window.innerHeight,
-  }));
-
-  // aim to center the target in the viewport
-  const desiredScrollY = Math.max(0, targetPageY - viewport.innerHeight / 2);
-  let distance = desiredScrollY - viewport.scrollY;
-
-  if (Math.abs(distance) < 10) return; // already there
-
-  const direction = distance > 0 ? 1 : -1;
-  let remaining = Math.abs(distance);
-
-  while (remaining > 0) {
-    // pick a chunk size
-    const chunk = Math.min(remaining, randomInt(220, 500));
-
-    // break chunk into small wheel steps (like a real finger on a trackpad)
-    let stepped = 0;
-    while (stepped < chunk) {
-      const step = Math.min(chunk - stepped, randomInt(18, 40));
-      await page.mouse.wheel(0, step * direction);
-      stepped += step;
-      await page.waitForTimeout(randomInt(16, 40));
-    }
-
-    remaining -= chunk;
-    if (remaining > 0) {
-      await page.waitForTimeout(randomInt(100, 260));
-    }
-  }
-
-  // let the page settle after scrolling
-  await page.waitForTimeout(randomInt(200, 400));
 }
 
 // ---------- main routine ----------

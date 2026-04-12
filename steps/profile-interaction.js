@@ -1,5 +1,5 @@
 // profile-interaction.js
-const { randomInt, scrollForDuration } = require("./utils/scroll-utils");
+const { randomInt, scrollForDuration, shuffle, sleep, humanScrollTo } = require("./utils/scroll-utils");
 const { ensureUrl } = require("./utils/navigation");
 const { getRandomProfileUrl } = require("../data/profile-urls");
 
@@ -10,18 +10,6 @@ const INITIAL_SCROLL_MAX_MS = 40000;
 const COLLECT_INTERVAL_MS = 2000; // snapshot DOM every 2s while scrolling
 const INTERACTION_WAIT_MIN_MS = 10000;
 const INTERACTION_WAIT_MAX_MS = 15000;
-
-function shuffle(array) {
-  for (let i = array.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [array[i], array[j]] = [array[j], array[i]];
-  }
-  return array;
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 // ---------- tag any untagged Like elements currently in DOM ----------
 
@@ -82,42 +70,6 @@ async function gatherTaggedPositions(page) {
     },
     { attr: LIKE_TRACKING_ATTR },
   );
-}
-
-// ---------- human scroll to a page-Y coordinate (up + down) ----------
-
-async function humanScrollTo(page, targetPageY) {
-  const viewport = await page.evaluate(() => ({
-    scrollY: window.scrollY,
-    innerHeight: window.innerHeight,
-  }));
-
-  const desiredScrollY = Math.max(0, targetPageY - viewport.innerHeight / 2);
-  let distance = desiredScrollY - viewport.scrollY;
-
-  if (Math.abs(distance) < 10) return;
-
-  const direction = distance > 0 ? 1 : -1;
-  let remaining = Math.abs(distance);
-
-  while (remaining > 0) {
-    const chunk = Math.min(remaining, randomInt(220, 500));
-    let stepped = 0;
-
-    while (stepped < chunk) {
-      const step = Math.min(chunk - stepped, randomInt(18, 40));
-      await page.mouse.wheel(0, step * direction);
-      stepped += step;
-      await page.waitForTimeout(randomInt(16, 40));
-    }
-
-    remaining -= chunk;
-    if (remaining > 0) {
-      await page.waitForTimeout(randomInt(100, 260));
-    }
-  }
-
-  await page.waitForTimeout(randomInt(200, 400));
 }
 
 // ---------- get fresh viewport box for a tagged element ----------
