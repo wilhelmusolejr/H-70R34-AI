@@ -7,6 +7,20 @@ const API_TOKEN = "pMgajBtFminGid3d6Wh0zFu2gPGx3BhUt3KX0S"; // <-- paste your to
 
 const headers = { Authorization: `Bearer ${API_TOKEN}` };
 
+// Resource types to block — saves 80-90% bandwidth on media-heavy sites like Facebook.
+// Like/Share buttons are found by aria-label so images are not needed.
+const BLOCKED_RESOURCE_TYPES = new Set(["image", "media", "font"]);
+
+async function blockMediaResources(page) {
+  await page.route("**/*", (route) => {
+    if (BLOCKED_RESOURCE_TYPES.has(route.request().resourceType())) {
+      route.abort();
+    } else {
+      route.continue();
+    }
+  });
+}
+
 async function openProfile(uuid) {
   const { data } = await axios.get(`${API}/openProfile?uuid=${uuid}`, {
     headers,
@@ -19,6 +33,10 @@ async function openProfile(uuid) {
   );
   const context = browser.contexts()[0];
   const page = context.pages()[0] || (await context.newPage());
+
+  await blockMediaResources(page);
+  console.log(`[hidemium] Media blocking enabled for profile ${uuid.slice(-8)}`);
+
   return { browser, context, page, port: data.data.remote_port };
 }
 
