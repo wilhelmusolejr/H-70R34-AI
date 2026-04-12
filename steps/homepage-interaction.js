@@ -18,31 +18,20 @@ const { ensureUrl } = require("./utils/navigation");
 const { generateShareMessage } = require("./utils/generate-share-message");
 
 const HOME_BUTTON_SELECTOR = '[aria-label="Home"]';
-const FACEBOOK_ORIGINS = ["https://www.facebook.com", "https://web.facebook.com"];
 
-// If already on Facebook → click the Home button to go to the feed.
-// If on a different site → navigate to facebook.com.
+// Click the Home button — the profile is already on Facebook from the filler step.
+// Falls back to navigating only if the Home button isn't found.
 async function ensureHomePage(page) {
-  const currentUrl = page.url();
-  let isOnFacebook = false;
-  try {
-    const origin = new URL(currentUrl).origin;
-    isOnFacebook = FACEBOOK_ORIGINS.includes(origin);
-  } catch {
-    // invalid url (e.g. about:blank) — treat as not on Facebook
+  const homeBtn = await page.$(HOME_BUTTON_SELECTOR);
+  if (homeBtn) {
+    await homeBtn.click();
+    await page.waitForLoadState("domcontentloaded").catch(() => {});
+    console.log("[fb-interact] Clicked Home button");
+    return;
   }
 
-  if (isOnFacebook) {
-    const homeBtn = await page.$(HOME_BUTTON_SELECTOR);
-    if (homeBtn) {
-      await homeBtn.click();
-      await page.waitForLoadState("domcontentloaded").catch(() => {});
-      console.log("[fb-interact] Clicked Home button to return to feed");
-      return;
-    }
-    console.log("[fb-interact] Already on Facebook but Home button not found — navigating");
-  }
-
+  // Fallback: Home button not found (e.g. page is blank or not on Facebook yet)
+  console.log("[fb-interact] Home button not found — navigating to facebook.com");
   await ensureUrl(page, "https://www.facebook.com/");
 }
 
