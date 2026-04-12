@@ -3,18 +3,20 @@ const { openProfile, closeProfile } = require("./hidemium");
 const runTestScript = require("./steps/test-script");
 const runFacebookHomepageInteraction = require("./steps/facebook-homepage-interaction");
 const runAddingFriendStep = require("./steps/adding-friend-step");
+const runProfileInteraction = require("./steps/profile-interaction");
 
 const PROFILE_UUID = "local-cb754975-1f0f-49d9-a6ea-ae56b6175dd0";
 const KEEP_PROFILE_OPEN = true;
 const REUSE_CURRENT_TAB = true;
 const START_URL = "https://www.facebook.com/";
 const OPEN_START_URL_WHEN_BLANK = true;
-const STEP_KEY = process.env.STEP_KEY || "adding_friend";
+const STEP_KEY = process.env.STEP_KEY || "profile_interaction";
 
 const STEP_RUNNERS = {
   test_script: runTestScript,
   facebook_homepage_interaction: runFacebookHomepageInteraction,
   adding_friend: runAddingFriendStep,
+  profile_interaction: runProfileInteraction,
 };
 
 async function getWorkingPage(context) {
