@@ -2,10 +2,14 @@
 const { randomInt, scrollForDuration } = require("./utils/scroll-utils");
 
 const LIKE_SELECTOR = 'div[aria-label="Like"]';
+const SHARE_BUTTON_SELECTOR =
+  '[aria-label="Send this to friends or post it on your profile."]';
+const SHARE_NOW_SELECTOR = '[aria-label="Share now"]';
+const SHARE_TEXTBOX_SELECTOR =
+  'div[role="dialog"] div[contenteditable="true"][role="textbox"]';
+const SHARE_MESSAGE = "lovely post! :)";
 const SCROLL_DURATION_MIN_MS = 10000;
 const SCROLL_DURATION_MAX_MS = 20000;
-const SCROLL_CHUNK_PAUSE_MIN_MS = 100;
-const SCROLL_CHUNK_PAUSE_MAX_MS = 260;
 const LOG_INTERVAL_MIN_MS = 10000;
 const LOG_INTERVAL_MAX_MS = 20000;
 
@@ -21,90 +25,289 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// ---------- target collection ----------
+// ---------- human scroll to a page-Y coordinate (up + down) ----------
 
-async function collectTargets(page) {
-  const total = await page.locator(LIKE_SELECTOR).count();
-  const halfCount = Math.floor(total / 2);
-  const indexes = shuffle(Array.from({ length: total }, (_, i) => i));
-  return { total, halfCount, indexes: indexes.slice(0, halfCount) };
+async function humanScrollTo(page, targetPageY) {
+  const viewport = await page.evaluate(() => ({
+    scrollY: window.scrollY,
+    innerHeight: window.innerHeight,
+  }));
+
+  const desiredScrollY = Math.max(0, targetPageY - viewport.innerHeight / 2);
+  let distance = desiredScrollY - viewport.scrollY;
+
+  if (Math.abs(distance) < 10) return;
+
+  const direction = distance > 0 ? 1 : -1;
+  let remaining = Math.abs(distance);
+
+  while (remaining > 0) {
+    const chunk = Math.min(remaining, randomInt(220, 500));
+    let stepped = 0;
+
+    while (stepped < chunk) {
+      const step = Math.min(chunk - stepped, randomInt(18, 40));
+      await page.mouse.wheel(0, step * direction);
+      stepped += step;
+      await page.waitForTimeout(randomInt(16, 40));
+    }
+
+    remaining -= chunk;
+    if (remaining > 0) {
+      await page.waitForTimeout(randomInt(100, 260));
+    }
+  }
+
+  await page.waitForTimeout(randomInt(200, 400));
 }
 
-// ---------- scroll-to + bounding box ----------
+// ---------- collection pass: scroll through and record Like positions ----------
 
-async function scrollToAndGetInfo(page, targetIndex) {
-  return page.evaluate(
-    ({ selector, idx }) => {
-      const elements = Array.from(document.querySelectorAll(selector));
-      const el = elements[idx];
-      if (!el) return { found: false, className: "", box: null };
+async function collectLikePositions(page) {
+  const scrollHeight = await page.evaluate(() => document.body.scrollHeight);
+  const viewportHeight = await page.evaluate(() => window.innerHeight);
 
-      el.scrollIntoView({
-        block: "center",
-        inline: "nearest",
-        behavior: "auto",
-      });
+  const allTargets = [];
+  const seenPositions = new Set();
 
-      const rect = el.getBoundingClientRect();
-      return {
-        found: true,
-        className: typeof el.className === "string" ? el.className : "",
-        box: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-      };
+  // scroll from top to bottom in overlapping steps
+  for (let y = 0; y < scrollHeight; y += Math.floor(viewportHeight * 0.7)) {
+    await humanScrollTo(page, y + viewportHeight / 2);
+    await page.waitForTimeout(randomInt(300, 600));
+
+    const visible = await page.evaluate(
+      ({ selector }) => {
+        return Array.from(document.querySelectorAll(selector)).map((el) => {
+          const rect = el.getBoundingClientRect();
+          return {
+            pageY: Math.round(window.scrollY + rect.y),
+            x: rect.x,
+            width: rect.width,
+            height: rect.height,
+          };
+        });
+      },
+      { selector: LIKE_SELECTOR },
+    );
+
+    for (const v of visible) {
+      const key = Math.round(v.pageY / 50) * 50;
+      if (!seenPositions.has(key)) {
+        seenPositions.add(key);
+        allTargets.push(v);
+      }
+    }
+  }
+
+  return allTargets;
+}
+
+// ---------- human-like typing ----------
+
+async function humanType(page, selector, text) {
+  await page.click(selector);
+  await page.waitForTimeout(randomInt(300, 600));
+
+  for (const char of text) {
+    await page.keyboard.type(char, { delay: randomInt(50, 180) });
+    // occasional micro-pause between words
+    if (char === " ") {
+      await page.waitForTimeout(randomInt(80, 250));
+    }
+  }
+}
+
+// ---------- share a post ----------
+
+async function sharePost(page, targetPageY) {
+  // scroll to the post
+  await humanScrollTo(page, targetPageY);
+  await page.waitForTimeout(randomInt(400, 800));
+
+  // find the Share button closest to viewport center
+  const shareBox = await page.evaluate(
+    ({ selector }) => {
+      const els = Array.from(document.querySelectorAll(selector));
+      const vcenter = window.innerHeight / 2;
+      let best = null;
+      let bestDist = Infinity;
+
+      for (const el of els) {
+        const rect = el.getBoundingClientRect();
+        const dist = Math.abs(rect.y + rect.height / 2 - vcenter);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+          };
+        }
+      }
+
+      return best;
     },
-    { selector: LIKE_SELECTOR, idx: targetIndex },
+    { selector: SHARE_BUTTON_SELECTOR },
   );
+
+  if (!shareBox) {
+    console.log(`[fb-interact] Share button not found at pageY≈${targetPageY}`);
+    return false;
+  }
+
+  // click the share button
+  const cx = shareBox.x + shareBox.width / 2;
+  const cy = shareBox.y + shareBox.height / 2;
+  await page.mouse.click(cx, cy, { delay: randomInt(40, 120) });
+  console.log(`[fb-interact] Clicked Share button at pageY≈${targetPageY}`);
+
+  // wait for the modal dialog to appear
+  try {
+    await page.waitForSelector('div[role="dialog"]', { timeout: 5000 });
+  } catch {
+    console.log("[fb-interact] Share modal did not appear.");
+    return false;
+  }
+  await page.waitForTimeout(randomInt(800, 1500));
+
+  // type the message in the textbox
+  try {
+    await page.waitForSelector(SHARE_TEXTBOX_SELECTOR, { timeout: 3000 });
+    await humanType(page, SHARE_TEXTBOX_SELECTOR, SHARE_MESSAGE);
+    console.log(`[fb-interact] Typed share message: "${SHARE_MESSAGE}"`);
+  } catch {
+    console.log("[fb-interact] Share textbox not found in modal.");
+    return false;
+  }
+
+  await page.waitForTimeout(randomInt(500, 1000));
+
+  // click "Share now"
+  const shareNowBox = await page.evaluate(
+    ({ selector }) => {
+      const el = document.querySelector(selector);
+      if (!el) return null;
+      const rect = el.getBoundingClientRect();
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    },
+    { selector: SHARE_NOW_SELECTOR },
+  );
+
+  if (!shareNowBox) {
+    console.log("[fb-interact] Share now button not found.");
+    return false;
+  }
+
+  const snCx = shareNowBox.x + shareNowBox.width / 2;
+  const snCy = shareNowBox.y + shareNowBox.height / 2;
+  await page.mouse.click(snCx, snCy, { delay: randomInt(40, 120) });
+  console.log("[fb-interact] Clicked Share now.");
+
+  // wait for modal to close
+  await page.waitForTimeout(randomInt(1500, 3000));
+  return true;
 }
 
 // ---------- main routine ----------
 
 async function runFacebookHomepageInteraction(page) {
   await page.waitForLoadState("domcontentloaded").catch(() => {});
-  const scrollDurationMs = randomInt(
-    SCROLL_DURATION_MIN_MS,
-    SCROLL_DURATION_MAX_MS,
-  );
-  console.log(
-    `[facebook-homepage-interaction] Scroll duration: ${(scrollDurationMs / 1000).toFixed(1)}s`,
-  );
-  await scrollForDuration(page, scrollDurationMs, {
-    chunkPauseMinMs: SCROLL_CHUNK_PAUSE_MIN_MS,
-    chunkPauseMaxMs: SCROLL_CHUNK_PAUSE_MAX_MS,
-  });
 
-  const targets = await collectTargets(page);
+  // initial human-like browsing scroll
+  const scrollMs = randomInt(SCROLL_DURATION_MIN_MS, SCROLL_DURATION_MAX_MS);
+  console.log(`[fb-interact] Initial browse: ${(scrollMs / 1000).toFixed(1)}s`);
+  await scrollForDuration(page, scrollMs);
+
+  // scroll back to top before collection pass
+  console.log("[fb-interact] Scrolling to top for collection pass...");
+  await humanScrollTo(page, 0);
+  await page.waitForTimeout(randomInt(500, 1000));
+
+  // pass 1: scroll through and record all Like button positions
+  const allTargets = await collectLikePositions(page);
   console.log(
-    `[fb-interact] Found ${targets.total} "${LIKE_SELECTOR}" elements, selecting ${targets.halfCount}`,
+    `[fb-interact] Collected ${allTargets.length} unique Like targets.`,
   );
 
-  if (targets.indexes.length === 0) {
-    console.log("[fb-interact] No targets selected.");
+  if (allTargets.length === 0) {
+    console.log("[fb-interact] No Like elements found. Skipping.");
     return;
   }
 
-  for (let i = 0; i < targets.indexes.length; i += 1) {
-    const targetIndex = targets.indexes[i];
-    const info = await scrollToAndGetInfo(page, targetIndex);
-    await page.waitForTimeout(randomInt(200, 600));
+  // select random half
+  const shuffled = shuffle([...allTargets]);
+  const selected = shuffled.slice(
+    0,
+    Math.max(1, Math.floor(allTargets.length / 2)),
+  );
+  console.log(`[fb-interact] Clicking ${selected.length} random targets.`);
 
-    if (!info.found || !info.box) {
-      console.log(`[fb-interact] #${targetIndex} skipped (gone from DOM)`);
-    } else {
-      try {
-        const cx = info.box.x + info.box.width / 2;
-        const cy = info.box.y + info.box.height / 2;
-        await page.mouse.click(cx, cy, { delay: randomInt(40, 120) });
-        console.log(
-          `[fb-interact] #${targetIndex} clicked — class="${info.className}"`,
-        );
-      } catch (err) {
-        console.log(
-          `[fb-interact] #${targetIndex} click failed: ${err.message}`,
-        );
-      }
+  // pick 1 random target from the selected half to share
+  const shareTargetIndex = randomInt(0, selected.length - 1);
+  console.log(
+    `[fb-interact] Will share post at index ${shareTargetIndex} (pageY≈${selected[shareTargetIndex].pageY})`,
+  );
+
+  // pass 2: scroll to each target and click
+  for (let i = 0; i < selected.length; i += 1) {
+    const target = selected[i];
+
+    await humanScrollTo(page, target.pageY);
+    await page.waitForTimeout(randomInt(250, 600));
+
+    // find the Like button closest to viewport center (freshly rendered)
+    const box = await page.evaluate(
+      ({ selector }) => {
+        const els = Array.from(document.querySelectorAll(selector));
+        const vcenter = window.innerHeight / 2;
+        let best = null;
+        let bestDist = Infinity;
+
+        for (const el of els) {
+          const rect = el.getBoundingClientRect();
+          const dist = Math.abs(rect.y + rect.height / 2 - vcenter);
+          if (dist < bestDist) {
+            bestDist = dist;
+            best = {
+              x: rect.x,
+              y: rect.y,
+              width: rect.width,
+              height: rect.height,
+            };
+          }
+        }
+
+        return best;
+      },
+      { selector: LIKE_SELECTOR },
+    );
+
+    if (!box) {
+      console.log(
+        `[fb-interact] Target at pageY≈${target.pageY} not found after scroll.`,
+      );
+      continue;
     }
 
-    if (i < targets.indexes.length - 1) {
+    try {
+      const cx = box.x + box.width / 2;
+      const cy = box.y + box.height / 2;
+      await page.mouse.click(cx, cy, { delay: randomInt(40, 120) });
+      console.log(`[fb-interact] Clicked Like at pageY≈${target.pageY}`);
+    } catch (err) {
+      console.log(
+        `[fb-interact] Click failed at pageY≈${target.pageY}: ${err.message}`,
+      );
+    }
+
+    // share this post if it's the chosen one
+    if (i === shareTargetIndex) {
+      await page.waitForTimeout(randomInt(1000, 2000));
+      await sharePost(page, target.pageY);
+    }
+
+    if (i < selected.length - 1) {
       const waitMs = randomInt(LOG_INTERVAL_MIN_MS, LOG_INTERVAL_MAX_MS);
       console.log(`[fb-interact] Waiting ${(waitMs / 1000).toFixed(1)}s...`);
       await sleep(waitMs);
