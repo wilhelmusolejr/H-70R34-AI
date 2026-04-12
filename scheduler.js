@@ -17,6 +17,7 @@ require("dotenv").config();
 const { openProfile, closeProfile } = require("./hidemium");
 const runHomepageInteraction = require("./steps/homepage-interaction");
 const runProfileInteraction = require("./steps/profile-interaction");
+const runSearchInteraction = require("./steps/search-interaction");
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -56,6 +57,7 @@ function timestamp() {
 
 const FILLER_STEPS = [
   { label: "profile_interaction", fn: runProfileInteraction },
+  { label: "search_interaction", fn: runSearchInteraction },
 ];
 
 function pickFillers(count) {

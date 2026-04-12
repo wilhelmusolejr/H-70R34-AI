@@ -11,25 +11,30 @@ const { openProfile, closeProfile } = require("./hidemium");
 // ---------- step registry (same as single-profile.js) ----------
 
 const FILLER_STEPS = {
-  homepage_interaction: {
-    module: require("./steps/homepage-interaction"),
-    label: "Facebook Homepage Interaction",
-  },
   profile_interaction: {
     module: require("./steps/profile-interaction"),
     label: "Profile Interaction",
+  },
+  search_interaction: {
+    module: require("./steps/search-interaction"),
+    label: "Search Interaction",
   },
 };
 
 const MAIN_TASKS = {
   homepage_interaction: {
     module: require("./steps/homepage-interaction"),
-    label: "Facebook Homepage Interaction",
+    label: "Homepage Interaction",
     requiredData: [],
   },
   profile_interaction: {
     module: require("./steps/profile-interaction"),
     label: "Profile Interaction",
+    requiredData: [],
+  },
+  search_interaction: {
+    module: require("./steps/search-interaction"),
+    label: "Search Interaction",
     requiredData: [],
   },
 };

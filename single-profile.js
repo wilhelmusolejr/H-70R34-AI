@@ -2,7 +2,6 @@
 const { openProfile, closeProfile } = require("./hidemium");
 const runTestScript = require("./steps/test-script");
 const runHomepageInteraction = require("./steps/homepage-interaction");
-const runAddingFriendStep = require("./steps/adding-friend-step");
 const runProfileInteraction = require("./steps/profile-interaction");
 const runSearchInteraction = require("./steps/search-interaction");
 
@@ -16,7 +15,6 @@ const STEP_KEY = process.env.STEP_KEY || "search_interaction";
 const STEP_RUNNERS = {
   test_script: runTestScript,
   homepage_interaction: runHomepageInteraction,
-  adding_friend: runAddingFriendStep,
   profile_interaction: runProfileInteraction,
   search_interaction: runSearchInteraction,
 };
