@@ -17,6 +17,35 @@ const { randomInt, scrollForDuration, shuffle, sleep, humanScrollTo } = require(
 const { ensureUrl } = require("./utils/navigation");
 const { generateShareMessage } = require("./utils/generate-share-message");
 
+const HOME_BUTTON_SELECTOR = '[aria-label="Home"]';
+const FACEBOOK_ORIGINS = ["https://www.facebook.com", "https://web.facebook.com"];
+
+// If already on Facebook → click the Home button to go to the feed.
+// If on a different site → navigate to facebook.com.
+async function ensureHomePage(page) {
+  const currentUrl = page.url();
+  let isOnFacebook = false;
+  try {
+    const origin = new URL(currentUrl).origin;
+    isOnFacebook = FACEBOOK_ORIGINS.includes(origin);
+  } catch {
+    // invalid url (e.g. about:blank) — treat as not on Facebook
+  }
+
+  if (isOnFacebook) {
+    const homeBtn = await page.$(HOME_BUTTON_SELECTOR);
+    if (homeBtn) {
+      await homeBtn.click();
+      await page.waitForLoadState("domcontentloaded").catch(() => {});
+      console.log("[fb-interact] Clicked Home button to return to feed");
+      return;
+    }
+    console.log("[fb-interact] Already on Facebook but Home button not found — navigating");
+  }
+
+  await ensureUrl(page, "https://www.facebook.com/");
+}
+
 // Who the automation is acting as — used as the AI persona when generating messages
 const USER_IDENTITY = "a regular Facebook user who enjoys sharing interesting posts";
 // What kind of content is being shared — gives the AI context for the message tone
@@ -188,7 +217,7 @@ async function sharePost(page, targetPageY, message) {
 // ---------- main routine ----------
 
 async function runHomepageInteraction(page) {
-  await ensureUrl(page, "https://www.facebook.com/", { matchOriginOnly: true });
+  await ensureHomePage(page);
 
   // initial human-like browsing scroll
   const scrollMs = randomInt(SCROLL_DURATION_MIN_MS, SCROLL_DURATION_MAX_MS);
