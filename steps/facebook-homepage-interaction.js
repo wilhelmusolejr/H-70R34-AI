@@ -1,21 +1,13 @@
 // facebook-homepage-interaction.js
+const { randomInt, scrollForDuration } = require("./utils/scroll-utils");
+
 const LIKE_SELECTOR = 'div[aria-label="Like"]';
 const SCROLL_DURATION_MIN_MS = 10000;
 const SCROLL_DURATION_MAX_MS = 20000;
-const SCROLL_CHUNK_MIN_PX = 220;
-const SCROLL_CHUNK_MAX_PX = 600;
-const SCROLL_STEP_MIN_PX = 18;
-const SCROLL_STEP_MAX_PX = 40;
-const SCROLL_STEP_DELAY_MIN_MS = 16;
-const SCROLL_STEP_DELAY_MAX_MS = 40;
 const SCROLL_CHUNK_PAUSE_MIN_MS = 100;
 const SCROLL_CHUNK_PAUSE_MAX_MS = 260;
 const LOG_INTERVAL_MIN_MS = 10000;
 const LOG_INTERVAL_MAX_MS = 20000;
-
-function randomInt(min, max) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
 
 function shuffle(array) {
   for (let i = array.length - 1; i > 0; i -= 1) {
@@ -27,41 +19,6 @@ function shuffle(array) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// ---------- human-like feed scroll ----------
-
-async function smoothScrollBy(page, distance) {
-  let remaining = distance;
-  while (remaining > 0) {
-    const step = Math.min(
-      remaining,
-      randomInt(SCROLL_STEP_MIN_PX, SCROLL_STEP_MAX_PX),
-    );
-    await page.mouse.wheel(0, step);
-    remaining -= step;
-    await page.waitForTimeout(
-      randomInt(SCROLL_STEP_DELAY_MIN_MS, SCROLL_STEP_DELAY_MAX_MS),
-    );
-  }
-}
-
-async function scrollForDuration(page, durationMs) {
-  const endTime = Date.now() + durationMs;
-  while (Date.now() < endTime) {
-    await smoothScrollBy(
-      page,
-      randomInt(SCROLL_CHUNK_MIN_PX, SCROLL_CHUNK_MAX_PX),
-    );
-    const remainingMs = endTime - Date.now();
-    if (remainingMs <= 0) break;
-    await page.waitForTimeout(
-      Math.min(
-        remainingMs,
-        randomInt(SCROLL_CHUNK_PAUSE_MIN_MS, SCROLL_CHUNK_PAUSE_MAX_MS),
-      ),
-    );
-  }
 }
 
 // ---------- target collection ----------
@@ -110,7 +67,10 @@ async function runFacebookHomepageInteraction(page) {
   console.log(
     `[facebook-homepage-interaction] Scroll duration: ${(scrollDurationMs / 1000).toFixed(1)}s`,
   );
-  await scrollForDuration(page, scrollDurationMs);
+  await scrollForDuration(page, scrollDurationMs, {
+    chunkPauseMinMs: SCROLL_CHUNK_PAUSE_MIN_MS,
+    chunkPauseMaxMs: SCROLL_CHUNK_PAUSE_MAX_MS,
+  });
 
   const targets = await collectTargets(page);
   console.log(

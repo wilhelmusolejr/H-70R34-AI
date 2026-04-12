@@ -9,7 +9,7 @@ const KEEP_PROFILE_OPEN = true;
 const REUSE_CURRENT_TAB = true;
 const START_URL = "https://www.facebook.com/";
 const OPEN_START_URL_WHEN_BLANK = true;
-const STEP_KEY = process.env.STEP_KEY || "facebook_homepage_interaction";
+const STEP_KEY = process.env.STEP_KEY || "adding_friend";
 
 const STEP_RUNNERS = {
   test_script: runTestScript,
