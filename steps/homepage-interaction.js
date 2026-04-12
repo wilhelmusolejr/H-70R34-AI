@@ -1,4 +1,4 @@
-// facebook-homepage-interaction.js
+// homepage-interaction.js
 const { randomInt, scrollForDuration, shuffle, sleep, humanScrollTo } = require("./utils/scroll-utils");
 const { ensureUrl } = require("./utils/navigation");
 
@@ -164,7 +164,7 @@ async function sharePost(page, targetPageY) {
 
 // ---------- main routine ----------
 
-async function runFacebookHomepageInteraction(page) {
+async function runHomepageInteraction(page) {
   await ensureUrl(page, "https://www.facebook.com/", { matchOriginOnly: true });
 
   // initial human-like browsing scroll
@@ -268,4 +268,4 @@ async function runFacebookHomepageInteraction(page) {
   }
 }
 
-module.exports = runFacebookHomepageInteraction;
+module.exports = runHomepageInteraction;

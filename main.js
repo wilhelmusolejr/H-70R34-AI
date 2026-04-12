@@ -12,7 +12,7 @@ const { openProfile, closeProfile } = require("./hidemium");
 
 const FILLER_STEPS = {
   homepage_interaction: {
-    module: require("./steps/facebook-homepage-interaction"),
+    module: require("./steps/homepage-interaction"),
     label: "Facebook Homepage Interaction",
   },
   profile_interaction: {
@@ -28,7 +28,7 @@ const MAIN_TASKS = {
     requiredData: ["url"],
   },
   homepage_interaction: {
-    module: require("./steps/facebook-homepage-interaction"),
+    module: require("./steps/homepage-interaction"),
     label: "Facebook Homepage Interaction",
     requiredData: [],
   },
