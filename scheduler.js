@@ -4,7 +4,7 @@
 //
 // Behaviour:
 //   - Runs immediately on start
-//   - After each run, sleeps until the next midnight (local time)
+//   - After each run, sleeps until a randomized time on the next day (local time)
 //   - Repeats indefinitely — keep this process alive (e.g. with pm2 or a terminal)
 //
 // Usage:
@@ -39,6 +39,10 @@ const MAIN_TASK_FILE = "homepage-interaction.js";
 const MAIN_TASK_LABEL = MAIN_TASK_FILE.replace(".js", "");
 
 const MAX_CONCURRENT = 3; // how many profiles run at the same time
+const NEXT_RUN_WINDOW_START_HOUR = 0;
+const NEXT_RUN_WINDOW_START_MINUTE = 30;
+const NEXT_RUN_WINDOW_END_HOUR = 1;
+const NEXT_RUN_WINDOW_END_MINUTE = 0;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -52,13 +56,38 @@ function sleep(ms) {
 
 function msUntilMidnight() {
   const now = new Date();
-  const midnight = new Date(now);
-  midnight.setHours(24, 0, 0, 0); // next midnight local time
-  return midnight - now;
+  return getNextRunTime(now) - now;
 }
 
 function timestamp() {
   return new Date().toLocaleString();
+}
+
+function getNextRunTime(fromTime = new Date()) {
+  const nextRun = new Date(fromTime);
+  nextRun.setDate(nextRun.getDate() + 1);
+
+  const windowStart = new Date(nextRun);
+  windowStart.setHours(
+    NEXT_RUN_WINDOW_START_HOUR,
+    NEXT_RUN_WINDOW_START_MINUTE,
+    0,
+    0,
+  );
+
+  const windowEnd = new Date(nextRun);
+  windowEnd.setHours(
+    NEXT_RUN_WINDOW_END_HOUR,
+    NEXT_RUN_WINDOW_END_MINUTE,
+    0,
+    0,
+  );
+
+  const startMs = windowStart.getTime();
+  const endMs = windowEnd.getTime();
+  const randomMs = randomInt(0, Math.max(0, endMs - startMs));
+
+  return new Date(startMs + randomMs);
 }
 
 // ─── Filler pool — auto-discovered from steps/ ───────────────────────────────
@@ -196,9 +225,12 @@ async function main() {
   while (true) {
     await runAllProfiles();
 
-    const waitMs = msUntilMidnight();
+    const nextRunAt = getNextRunTime();
+    const waitMs = nextRunAt - new Date();
     const waitMins = Math.round(waitMs / 60000);
-    console.log(`[scheduler] Next run at midnight — waiting ${waitMins} min\n`);
+    console.log(
+      `[scheduler] Next run scheduled for ${nextRunAt.toLocaleString()} — waiting ${waitMins} min\n`,
+    );
     await sleep(waitMs);
   }
 }
