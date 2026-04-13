@@ -73,20 +73,34 @@ async function requestGitHubModels(messages, options = {}) {
 
 async function generateShareMessage(userIdentity, postContext) {
   try {
-    const systemPrompt = `You are ${userIdentity}. Write a short, natural Facebook share message for the post described below. It should sound casual and human, not polished or AI-written. Avoid em dashes, long hyphens used like em dashes, corporate phrasing, and overly perfect grammar. Prefer simple everyday wording. Return only the message text, with no quotes, no explanation, and no hashtags unless they feel natural for this person.`;
+    const systemPrompt = `
+      USER PERSONA: ${userIdentity}
+      
+      TASK:
+      1. Analyze the "Post Context" to determine the appropriate mood (e.g., excited, cynical, helpful, amused, or shocked).
+      2. Write a Facebook share message in the "USER PERSONA" typing style.
+      
+      CONSTRAINTS:
+      - VARIETY: Never use "Check this out" or "Pretty cool."
+      - TYPING STYLE: Match how a real person types. If the persona is casual, use lowercase, occasional slang, or sentence fragments. Avoid "AI enthusiasm."
+      - DYNAMIC RESPONSE: If the post is news, react to the news. If it's a product, react to the utility. If it's a joke, react to the humor.
+      - LENGTH: Keep it under 20 words.
+      - OUTPUT: Plain text only. No quotes, no hashtags, no "Mood: [Mood]".
+    `.trim();
 
     const { payload } = await requestGitHubModels([
-      {
-        role: "system",
-        content: systemPrompt,
-      },
+      { role: "system", content: systemPrompt },
       {
         role: "user",
-        content: `Post context:\n${postContext}`,
+        content: `Post Context: ${postContext}\n\nGenerate the share message:`,
       },
     ]);
 
-    const message = payload.choices[0]?.message?.content?.trim() ?? "";
+    // Clean up any stray quotes the AI might include
+    const message =
+      payload.choices[0]?.message?.content
+        ?.trim()
+        .replace(/^["']|["']$/g, "") ?? "";
     console.log(`[generate-share-message] Generated: "${message}"`);
     return message;
   } catch (err) {
@@ -94,5 +108,4 @@ async function generateShareMessage(userIdentity, postContext) {
     return "";
   }
 }
-
 module.exports = { generateShareMessage };

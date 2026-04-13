@@ -13,7 +13,13 @@
 //           optionally type SHARE_MESSAGE, then click Share now
 //        c. Wait 10–20 s between interactions
 //
-const { randomInt, scrollForDuration, shuffle, sleep, humanScrollTo } = require("./utils/scroll-utils");
+const {
+  randomInt,
+  scrollForDuration,
+  shuffle,
+  sleep,
+  humanScrollTo,
+} = require("./utils/scroll-utils");
 const { ensureUrl } = require("./utils/navigation");
 const { generateShareMessage } = require("./utils/generate-share-message");
 const {
@@ -41,12 +47,15 @@ async function ensureHomePage(page) {
 
   // Fallback: Home button not found (e.g. page is blank or not on Facebook yet)
   await captureIssueScreenshot(page, "home-button-not-found");
-  console.log("[fb-interact] Home button not found — navigating to facebook.com");
+  console.log(
+    "[fb-interact] Home button not found — navigating to facebook.com",
+  );
   await ensureUrl(page, "https://www.facebook.com/");
 }
 
 // Who the automation is acting as — used as the AI persona when generating messages
-const USER_IDENTITY = "a regular Facebook user who enjoys sharing interesting posts";
+const USER_IDENTITY =
+  "a casual Facebook user who writes like they are texting a friend—short, low-effort, and uses lowercase";
 // What kind of content is being shared — gives the AI context for the message tone
 const POST_CONTEXT = "a post from my Facebook feed";
 
@@ -102,6 +111,39 @@ async function collectLikePositions(page) {
   }
 
   return allTargets;
+}
+
+async function hasShareButtonNearTarget(page, targetPageY) {
+  await humanScrollTo(page, targetPageY);
+  await page.waitForTimeout(randomInt(250, 600));
+
+  const shareBox = await page.evaluate(
+    ({ selector }) => {
+      const els = Array.from(document.querySelectorAll(selector));
+      const vcenter = window.innerHeight / 2;
+      let best = null;
+      let bestDist = Infinity;
+
+      for (const el of els) {
+        const rect = el.getBoundingClientRect();
+        const dist = Math.abs(rect.y + rect.height / 2 - vcenter);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+          };
+        }
+      }
+
+      return best;
+    },
+    { selector: SHARE_BUTTON_SELECTOR },
+  );
+
+  return Boolean(shareBox);
 }
 
 // ---------- human-like typing ----------
@@ -252,16 +294,43 @@ async function runHomepageInteraction(page) {
   console.log(`[fb-interact] Clicking ${selected.length} random targets.`);
 
   // pick 1–3 random targets from the selected half to share
-  const shareCount = Math.min(
+  const requestedShareCount = Math.min(
     randomInt(SHARE_COUNT_MIN, SHARE_COUNT_MAX),
     selected.length,
   );
+  const candidateShareIndexes = shuffle(
+    Array.from({ length: selected.length }, (_, index) => index),
+  );
   const shareIndexes = new Set();
-  while (shareIndexes.size < shareCount) {
-    shareIndexes.add(randomInt(0, selected.length - 1));
+
+  for (const candidateIndex of candidateShareIndexes) {
+    if (shareIndexes.size >= requestedShareCount) {
+      break;
+    }
+
+    const candidateTarget = selected[candidateIndex];
+    const isShareable = await hasShareButtonNearTarget(
+      page,
+      candidateTarget.pageY,
+    );
+
+    if (!isShareable) {
+      console.log(
+        `[fb-interact] Share button not available for target at pageY≈${candidateTarget.pageY}, choosing another post.`,
+      );
+      continue;
+    }
+
+    shareIndexes.add(candidateIndex);
+  }
+
+  if (shareIndexes.size < requestedShareCount) {
+    console.log(
+      `[fb-interact] Only found ${shareIndexes.size} shareable post(s) out of requested ${requestedShareCount}.`,
+    );
   }
   console.log(
-    `[fb-interact] Will share ${shareCount} post(s) at indexes: ${[...shareIndexes].join(", ")}`,
+    `[fb-interact] Will share ${shareIndexes.size} post(s) at indexes: ${[...shareIndexes].join(", ")}`,
   );
 
   // pass 2: scroll to each target and click
