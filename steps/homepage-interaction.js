@@ -16,6 +16,10 @@
 const { randomInt, scrollForDuration, shuffle, sleep, humanScrollTo } = require("./utils/scroll-utils");
 const { ensureUrl } = require("./utils/navigation");
 const { generateShareMessage } = require("./utils/generate-share-message");
+const {
+  captureIssueScreenshot,
+  waitForLoadStateWithScreenshot,
+} = require("../utils/runtime-monitor");
 
 const HOME_BUTTON_SELECTOR = '[aria-label="Home"]';
 
@@ -25,12 +29,18 @@ async function ensureHomePage(page) {
   const homeBtn = await page.$(HOME_BUTTON_SELECTOR);
   if (homeBtn) {
     await homeBtn.click();
-    await page.waitForLoadState("domcontentloaded").catch(() => {});
+    await waitForLoadStateWithScreenshot(
+      page,
+      "domcontentloaded",
+      {},
+      "home-button-domcontentloaded",
+    );
     console.log("[fb-interact] Clicked Home button");
     return;
   }
 
   // Fallback: Home button not found (e.g. page is blank or not on Facebook yet)
+  await captureIssueScreenshot(page, "home-button-not-found");
   console.log("[fb-interact] Home button not found — navigating to facebook.com");
   await ensureUrl(page, "https://www.facebook.com/");
 }
@@ -144,6 +154,7 @@ async function sharePost(page, targetPageY, message) {
   );
 
   if (!shareBox) {
+    await captureIssueScreenshot(page, "share-button-not-found");
     console.log(`[fb-interact] Share button not found at pageY≈${targetPageY}`);
     return false;
   }
@@ -157,7 +168,8 @@ async function sharePost(page, targetPageY, message) {
   // wait for the modal dialog to appear
   try {
     await page.waitForSelector('div[role="dialog"]', { timeout: 5000 });
-  } catch {
+  } catch (error) {
+    await captureIssueScreenshot(page, "share-modal-not-found", error);
     console.log("[fb-interact] Share modal did not appear.");
     return false;
   }
@@ -169,7 +181,8 @@ async function sharePost(page, targetPageY, message) {
       await page.waitForSelector(SHARE_TEXTBOX_SELECTOR, { timeout: 3000 });
       await humanType(page, SHARE_TEXTBOX_SELECTOR, message);
       console.log(`[fb-interact] Typed share message: "${message}"`);
-    } catch {
+    } catch (error) {
+      await captureIssueScreenshot(page, "share-textbox-not-found", error);
       console.log("[fb-interact] Share textbox not found in modal.");
       return false;
     }
@@ -189,6 +202,7 @@ async function sharePost(page, targetPageY, message) {
   );
 
   if (!shareNowBox) {
+    await captureIssueScreenshot(page, "share-now-not-found");
     console.log("[fb-interact] Share now button not found.");
     return false;
   }
@@ -285,6 +299,7 @@ async function runHomepageInteraction(page) {
     );
 
     if (!box) {
+      await captureIssueScreenshot(page, "homepage-like-target-not-found");
       console.log(
         `[fb-interact] Target at pageY≈${target.pageY} not found after scroll.`,
       );
@@ -297,6 +312,7 @@ async function runHomepageInteraction(page) {
       await page.mouse.click(cx, cy, { delay: randomInt(40, 120) });
       console.log(`[fb-interact] Clicked Like at pageY≈${target.pageY}`);
     } catch (err) {
+      await captureIssueScreenshot(page, "homepage-like-click-failed", err);
       console.log(
         `[fb-interact] Click failed at pageY≈${target.pageY}: ${err.message}`,
       );

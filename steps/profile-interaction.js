@@ -8,6 +8,10 @@ const {
 } = require("./utils/scroll-utils");
 const { ensureUrl } = require("./utils/navigation");
 const { getRandomProfileUrl } = require("../data/profile-urls");
+const {
+  captureIssueScreenshot,
+  waitForLoadStateWithScreenshot,
+} = require("../utils/runtime-monitor");
 
 const LIKE_SELECTOR = 'div[aria-label="Like"]';
 const LIKE_TRACKING_ATTR = "data-profile-interaction-like-id";
@@ -60,6 +64,7 @@ async function clickProfileTab(page, label) {
 
   const info = await findProfileTab(page, label);
   if (!info.found || !info.box) {
+    await captureIssueScreenshot(page, `profile-tab-${label}-not-found`);
     console.log(`[profile-interaction] Tab "${label}" not found.`);
     return false;
   }
@@ -69,6 +74,7 @@ async function clickProfileTab(page, label) {
 
   const refreshed = await findProfileTab(page, label);
   if (!refreshed.found || !refreshed.box) {
+    await captureIssueScreenshot(page, `profile-tab-${label}-disappeared`);
     console.log(`[profile-interaction] Tab "${label}" disappeared before click.`);
     return false;
   }
@@ -126,14 +132,24 @@ async function browseRandomProfileTab(page) {
     return;
   }
 
-  await page.waitForLoadState("domcontentloaded").catch(() => {});
+  await waitForLoadStateWithScreenshot(
+    page,
+    "domcontentloaded",
+    {},
+    `profile-tab-${chosenLabel}-domcontentloaded`,
+  );
   await page.waitForTimeout(randomInt(700, 1200));
   await scrollForDuration(page, PROFILE_TAB_BROWSE_MS);
   await page.waitForTimeout(randomInt(400, 800));
 
   const backToAll = await clickProfileTab(page, "All");
   if (backToAll) {
-    await page.waitForLoadState("domcontentloaded").catch(() => {});
+    await waitForLoadStateWithScreenshot(
+      page,
+      "domcontentloaded",
+      {},
+      "profile-tab-all-domcontentloaded",
+    );
     await page.waitForTimeout(randomInt(700, 1200));
   }
 }
@@ -186,6 +202,7 @@ async function addFriendAfterInteraction(page) {
 
   const info = await findAddFriendPosition(page);
   if (!info.found) {
+    await captureIssueScreenshot(page, "add-friend-button-not-found");
     console.log("[profile-interaction] Add Friend button not found.");
     return;
   }
@@ -199,6 +216,7 @@ async function addFriendAfterInteraction(page) {
 
   const box = await getAddFriendBox(page);
   if (!box) {
+    await captureIssueScreenshot(page, "add-friend-button-lost");
     console.log("[profile-interaction] Add Friend button lost after scroll.");
     return;
   }
@@ -211,6 +229,7 @@ async function addFriendAfterInteraction(page) {
       `[profile-interaction] Clicked Add Friend, text="${info.text}"`,
     );
   } catch (err) {
+    await captureIssueScreenshot(page, "add-friend-click-failed", err);
     console.log(`[profile-interaction] Add Friend click failed: ${err.message}`);
   }
 }
@@ -427,6 +446,7 @@ async function runProfileInteraction(page, data) {
     );
 
     if (!box) {
+      await captureIssueScreenshot(page, "profile-like-target-not-found");
       console.log(
         `[profile-interaction] Target at pageY=${target.pageY} not found after scroll.`,
       );
@@ -441,6 +461,7 @@ async function runProfileInteraction(page, data) {
         `[profile-interaction] Clicked Like at pageY≈${target.pageY}`,
       );
     } catch (err) {
+      await captureIssueScreenshot(page, "profile-like-click-failed", err);
       console.log(
         `[profile-interaction] Click failed at pageY≈${target.pageY}: ${err.message}`,
       );

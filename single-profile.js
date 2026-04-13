@@ -4,6 +4,13 @@ const runTestScript = require("./steps/test-script");
 const runHomepageInteraction = require("./steps/homepage-interaction");
 const runProfileInteraction = require("./steps/profile-interaction");
 const runSearchInteraction = require("./steps/search-interaction");
+const {
+  captureIssueScreenshot,
+  instrumentPage,
+  runWithErrorScreenshot,
+  setPageContext,
+  withLogContext,
+} = require("./utils/runtime-monitor");
 
 const PROFILE_UUID = "local-cb754975-1f0f-49d9-a6ea-ae56b6175dd0";
 const KEEP_PROFILE_OPEN = true;
@@ -60,36 +67,60 @@ async function ensureStartPage(page) {
 }
 
 async function run() {
-  let browser;
-  const shouldCloseProfile = !KEEP_PROFILE_OPEN;
-  const runStep = STEP_RUNNERS[STEP_KEY];
+  return withLogContext(
+    {
+      account: PROFILE_UUID.slice(-8),
+      accountUuid: PROFILE_UUID,
+      runTag: "single-profile",
+    },
+    async () => {
+      let browser;
+      let page;
+      const shouldCloseProfile = !KEEP_PROFILE_OPEN;
+      const runStep = STEP_RUNNERS[STEP_KEY];
 
-  if (!runStep) {
-    throw new Error(
-      `Unknown STEP_KEY "${STEP_KEY}". Available: ${Object.keys(STEP_RUNNERS).join(", ")}`,
-    );
-  }
+      if (!runStep) {
+        throw new Error(
+          `Unknown STEP_KEY "${STEP_KEY}". Available: ${Object.keys(STEP_RUNNERS).join(", ")}`,
+        );
+      }
 
-  try {
-    const session = await openProfile(PROFILE_UUID);
-    browser = session.browser;
+      try {
+        const session = await openProfile(PROFILE_UUID);
+        browser = session.browser;
 
-    const page = await getWorkingPage(session.context);
-    await ensureStartPage(page);
-    console.log(`Using current tab: ${page.url() || "about:blank"}`);
+        page = await getWorkingPage(session.context);
+        setPageContext(page, {
+          account: PROFILE_UUID.slice(-8),
+          accountUuid: PROFILE_UUID,
+          runTag: "single-profile",
+        });
+        instrumentPage(page);
 
-    console.log(`Running step: ${STEP_KEY}`);
-    await runStep(page);
-  } finally {
-    if (shouldCloseProfile) {
-      await closeProfile(PROFILE_UUID, browser);
-      console.log("Profile closed");
-      return;
-    }
+        await runWithErrorScreenshot(page, "ensure-start-page", () =>
+          ensureStartPage(page),
+        );
+        console.log(`Using current tab: ${page.url() || "about:blank"}`);
 
-    // Dev mode: keep profile/browser open across runs for fast iteration.
-    console.log("Development mode: profile left open for reuse.");
-  }
+        console.log(`Running step: ${STEP_KEY}`);
+        await runWithErrorScreenshot(page, `single-step-${STEP_KEY}`, () =>
+          runStep(page),
+        );
+      } catch (error) {
+        await captureIssueScreenshot(page, "single-profile-run-error", error);
+        throw error;
+      } finally {
+        if (shouldCloseProfile) {
+          await closeProfile(PROFILE_UUID, browser);
+          console.log("Profile closed");
+          return;
+        }
+
+        // Dev mode: keep profile/browser open across runs for fast iteration.
+        console.log("Development mode: profile left open for reuse.");
+      }
+    },
+  );
 }
 
 run().catch((error) => {

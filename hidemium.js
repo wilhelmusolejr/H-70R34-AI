@@ -1,11 +1,18 @@
 // hidemium.js — Reusable helper module
 const axios = require("axios");
 const { chromium } = require("playwright");
+const {
+  installConsoleFormatting,
+  instrumentPage,
+  setPageContext,
+} = require("./utils/runtime-monitor");
 
 const API = "http://127.0.0.1:2222";
 const API_TOKEN = "pMgajBtFminGid3d6Wh0zFu2gPGx3BhUt3KX0S"; // <-- paste your token from Hidemium Settings > Generate token
 
 const headers = { Authorization: `Bearer ${API_TOKEN}` };
+
+installConsoleFormatting();
 
 // Resource types to block — saves 80-90% bandwidth on media-heavy sites like Facebook.
 // Like/Share buttons are found by aria-label so images are not needed.
@@ -34,6 +41,12 @@ async function openProfile(uuid) {
   );
   const context = browser.contexts()[0];
   const page = context.pages()[0] || (await context.newPage());
+
+  setPageContext(page, {
+    account: uuid.slice(-8),
+    accountUuid: uuid,
+  });
+  instrumentPage(page);
 
   await blockMediaResources(context);
   console.log(`[hidemium] Media blocking enabled for profile ${uuid.slice(-8)}`);

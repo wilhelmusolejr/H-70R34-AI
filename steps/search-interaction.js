@@ -3,6 +3,10 @@ const {
   scrollForDuration,
   humanScrollTo,
 } = require("./utils/scroll-utils");
+const {
+  captureIssueScreenshot,
+  waitForLoadStateWithScreenshot,
+} = require("../utils/runtime-monitor");
 
 const SEARCH_INPUT_SELECTOR = [
   'input[aria-label="Search Facebook"][type="search"]',
@@ -143,6 +147,7 @@ async function clickRandomTarget(page, selector, label) {
   );
 
   if (targets.length === 0) {
+    await captureIssueScreenshot(page, `${label}-targets-not-found`);
     console.log(`[search-interaction] No ${label} buttons found.`);
     return false;
   }
@@ -153,6 +158,7 @@ async function clickRandomTarget(page, selector, label) {
 
   const box = await findNearestBox(page, selector);
   if (!box) {
+    await captureIssueScreenshot(page, `${label}-target-not-found-after-scroll`);
     console.log(
       `[search-interaction] Random ${label} button not found after scroll.`,
     );
@@ -189,11 +195,17 @@ async function maybeClickRandomFollow(page) {
 async function runSearchInteraction(page) {
   const searchQuery = getSearchQuery();
 
-  await page.waitForLoadState("domcontentloaded").catch(() => {});
+  await waitForLoadStateWithScreenshot(
+    page,
+    "domcontentloaded",
+    {},
+    "search-page-domcontentloaded",
+  );
   await page.waitForTimeout(randomInt(700, 1400));
 
   const searchBox = await findSearchInputBox(page);
   if (!searchBox) {
+    await captureIssueScreenshot(page, "search-input-not-found");
     console.log("[search-interaction] Search input not found.");
     return;
   }
@@ -216,8 +228,18 @@ async function runSearchInteraction(page) {
   await page.keyboard.press("Enter");
 
   console.log("[search-interaction] Submitted search with Enter.");
-  await page.waitForLoadState("domcontentloaded").catch(() => {});
-  await page.waitForLoadState("networkidle").catch(() => {});
+  await waitForLoadStateWithScreenshot(
+    page,
+    "domcontentloaded",
+    {},
+    "search-results-domcontentloaded",
+  );
+  await waitForLoadStateWithScreenshot(
+    page,
+    "networkidle",
+    {},
+    "search-results-networkidle",
+  );
   await page.waitForTimeout(randomInt(800, 1400));
 
   const browseMs = randomInt(RESULT_SCROLL_MIN_MS, RESULT_SCROLL_MAX_MS);

@@ -18,6 +18,13 @@ const fs = require("fs");
 const path = require("path");
 const { openProfile, closeProfile } = require("./hidemium");
 const runHomepageInteraction = require("./steps/homepage-interaction");
+const {
+  captureIssueScreenshot,
+  instrumentPage,
+  runWithErrorScreenshot,
+  setPageContext,
+  withLogContext,
+} = require("./utils/runtime-monitor");
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -79,44 +86,63 @@ function pickFillers(count) {
 
 async function runOneProfile(uuid, index) {
   const tag = `[profile-${index + 1}:${uuid.slice(-8)}]`;
+  const runTag = `profile-${index + 1}`;
 
-  let session;
-  try {
-    console.log(`${tag} Opening...`);
-    session = await openProfile(uuid);
-    const page =
-      session.context.pages().find((p) => p.url() !== "about:blank") ||
-      session.context.pages()[0] ||
-      (await session.context.newPage());
+  return withLogContext(
+    { account: uuid.slice(-8), accountUuid: uuid, runTag },
+    async () => {
+      let session;
+      let page;
 
-    // filler before
-    for (const filler of pickFillers(randomInt(1, 2))) {
-      console.log(`${tag} Filler before: ${filler.label}`);
-      await filler.fn(page, null);
-      await sleep(randomInt(3000, 8000));
-    }
+      try {
+        console.log(`${tag} Opening...`);
+        session = await openProfile(uuid);
+        page =
+          session.context.pages().find((p) => p.url() !== "about:blank") ||
+          session.context.pages()[0] ||
+          (await session.context.newPage());
 
-    // main task
-    console.log(`${tag} Main: ${MAIN_TASK_LABEL}`);
-    await MAIN_TASK(page, null);
-    await sleep(randomInt(3000, 8000));
+        setPageContext(page, {
+          account: uuid.slice(-8),
+          accountUuid: uuid,
+          runTag,
+        });
+        instrumentPage(page);
 
-    // filler after
-    for (const filler of pickFillers(randomInt(1, 2))) {
-      console.log(`${tag} Filler after: ${filler.label}`);
-      await filler.fn(page, null);
-      await sleep(randomInt(3000, 8000));
-    }
+        for (const filler of pickFillers(randomInt(1, 2))) {
+          console.log(`${tag} Filler before: ${filler.label}`);
+          await runWithErrorScreenshot(page, `filler-before-${filler.label}`, () =>
+            filler.fn(page, null),
+          );
+          await sleep(randomInt(3000, 8000));
+        }
 
-    console.log(`${tag} Done.`);
-  } catch (err) {
-    console.error(`${tag} Error: ${err.message}`);
-  } finally {
-    if (session) {
-      await closeProfile(uuid, session.browser);
-      console.log(`${tag} Profile closed.`);
-    }
-  }
+        console.log(`${tag} Main: ${MAIN_TASK_LABEL}`);
+        await runWithErrorScreenshot(page, `main-task-${MAIN_TASK_LABEL}`, () =>
+          MAIN_TASK(page, null),
+        );
+        await sleep(randomInt(3000, 8000));
+
+        for (const filler of pickFillers(randomInt(1, 2))) {
+          console.log(`${tag} Filler after: ${filler.label}`);
+          await runWithErrorScreenshot(page, `filler-after-${filler.label}`, () =>
+            filler.fn(page, null),
+          );
+          await sleep(randomInt(3000, 8000));
+        }
+
+        console.log(`${tag} Done.`);
+      } catch (err) {
+        await captureIssueScreenshot(page, "scheduler-profile-error", err);
+        console.error(`${tag} Error: ${err.message}`);
+      } finally {
+        if (session) {
+          await closeProfile(uuid, session.browser);
+          console.log(`${tag} Profile closed.`);
+        }
+      }
+    },
+  );
 }
 
 // ─── Run all profiles (staggered, with concurrency limit) ────────────────────

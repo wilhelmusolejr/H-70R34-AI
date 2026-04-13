@@ -9,6 +9,13 @@
 const fs = require("fs");
 const path = require("path");
 const { openProfile, closeProfile } = require("./hidemium");
+const {
+  captureIssueScreenshot,
+  instrumentPage,
+  runWithErrorScreenshot,
+  setPageContext,
+  withLogContext,
+} = require("./utils/runtime-monitor");
 
 // ---------- step registry ----------
 
@@ -78,48 +85,68 @@ function parseArgs() {
 async function runOneProfile(profileUuid, mainTaskKey, taskData, profileIndex) {
   const tag = `[profile-${profileIndex + 1}:${profileUuid.slice(-8)}]`;
   const mainTask = MAIN_TASKS[mainTaskKey];
+  const runTag = `profile-${profileIndex + 1}`;
 
-  console.log(`${tag} Opening profile...`);
-  const session = await openProfile(profileUuid);
-  const page =
-    session.context.pages().find((p) => p.url() !== "about:blank") ||
-    session.context.pages()[0] ||
-    (await session.context.newPage());
+  return withLogContext(
+    { account: profileUuid.slice(-8), accountUuid: profileUuid, runTag },
+    async () => {
+      let session;
+      let page;
 
-  console.log(`${tag} Attached to: ${page.url() || "about:blank"}`);
+      try {
+        console.log(`${tag} Opening profile...`);
+        session = await openProfile(profileUuid);
+        page =
+          session.context.pages().find((p) => p.url() !== "about:blank") ||
+          session.context.pages()[0] ||
+          (await session.context.newPage());
 
-  // derive the filename used to exclude this task from fillers
-  const mainTaskFile = mainTaskKey.replace(/_/g, "-") + ".js";
+        setPageContext(page, {
+          account: profileUuid.slice(-8),
+          accountUuid: profileUuid,
+          runTag,
+        });
+        instrumentPage(page);
 
-  try {
-    // --- random filler(s) before ---
-    const beforeSteps = pickRandomFillers(mainTaskFile, randomInt(1, 2));
-    for (const step of beforeSteps) {
-      console.log(`${tag} Filler: ${step.label}`);
-      await step.fn(page, null);
-      await sleep(randomInt(3000, 8000));
-    }
+        console.log(`${tag} Attached to: ${page.url() || "about:blank"}`);
 
-    // --- main task ---
-    console.log(`${tag} Main task: ${mainTask.label}`);
-    await mainTask.module(page, taskData);
-    await sleep(randomInt(3000, 8000));
+        // derive the filename used to exclude this task from fillers
+        const mainTaskFile = mainTaskKey.replace(/_/g, "-") + ".js";
 
-    // --- random filler(s) after ---
-    const afterSteps = pickRandomFillers(mainTaskFile, randomInt(1, 2));
-    for (const step of afterSteps) {
-      console.log(`${tag} Filler: ${step.label}`);
-      await step.fn(page, null);
-      await sleep(randomInt(3000, 8000));
-    }
+        const beforeSteps = pickRandomFillers(mainTaskFile, randomInt(1, 2));
+        for (const step of beforeSteps) {
+          console.log(`${tag} Filler: ${step.label}`);
+          await runWithErrorScreenshot(page, `filler-before-${step.label}`, () =>
+            step.fn(page, null),
+          );
+          await sleep(randomInt(3000, 8000));
+        }
 
-    console.log(`${tag} Done.`);
-  } catch (err) {
-    console.error(`${tag} Error: ${err.message}`);
-  } finally {
-    await closeProfile(profileUuid, session.browser);
-    console.log(`${tag} Profile closed.`);
-  }
+        console.log(`${tag} Main task: ${mainTask.label}`);
+        await runWithErrorScreenshot(page, `main-task-${mainTaskKey}`, () =>
+          mainTask.module(page, taskData),
+        );
+        await sleep(randomInt(3000, 8000));
+
+        const afterSteps = pickRandomFillers(mainTaskFile, randomInt(1, 2));
+        for (const step of afterSteps) {
+          console.log(`${tag} Filler: ${step.label}`);
+          await runWithErrorScreenshot(page, `filler-after-${step.label}`, () =>
+            step.fn(page, null),
+          );
+          await sleep(randomInt(3000, 8000));
+        }
+
+        console.log(`${tag} Done.`);
+      } catch (err) {
+        await captureIssueScreenshot(page, "run-one-profile-error", err);
+        console.error(`${tag} Error: ${err.message}`);
+      } finally {
+        await closeProfile(profileUuid, session && session.browser);
+        console.log(`${tag} Profile closed.`);
+      }
+    },
+  );
 }
 
 // ---------- main ----------

@@ -2,6 +2,13 @@
 const PROFILE_UUID =
   process.env.HIDEMIUM_PROFILE_UUID ||
   "local-cb754975-1f0f-49d9-a6ea-ae56b6175dd0";
+const {
+  captureIssueScreenshot,
+  instrumentPage,
+  setPageContext,
+  waitForLoadStateWithScreenshot,
+  withLogContext,
+} = require("../utils/runtime-monitor");
 const LIKE_SELECTOR = 'div[aria-label="Like"]';
 const SCROLL_DURATION_MS = 10000;
 const SCROLL_CHUNK_MIN_PX = 220;
@@ -116,7 +123,12 @@ async function runTestScript(page) {
   }
 
   console.log("Running test-script...");
-  await page.waitForLoadState("domcontentloaded").catch(() => {});
+  await waitForLoadStateWithScreenshot(
+    page,
+    "domcontentloaded",
+    {},
+    "test-script-domcontentloaded",
+  );
   await scrollForDuration(page, SCROLL_DURATION_MS);
 
   const result = await collectLikeTargets(page);
@@ -135,6 +147,7 @@ async function runTestScript(page) {
     await page.waitForTimeout(randomInt(200, 600));
 
     if (!info.found || !info.box) {
+      await captureIssueScreenshot(page, "test-script-target-not-found");
       console.log(`#${targetIndex} skipped (element no longer present)`);
     } else {
       try {
@@ -145,6 +158,7 @@ async function runTestScript(page) {
         });
         console.log(`#${targetIndex} clicked — class="${info.className}"`);
       } catch (clickError) {
+        await captureIssueScreenshot(page, "test-script-click-failed", clickError);
         console.log(`#${targetIndex} click failed: ${clickError.message}`);
       }
     }
@@ -175,12 +189,28 @@ if (require.main === module) {
   }
 
   (async () => {
-    const session = await openProfile(PROFILE_UUID);
-    const page = await getWorkingPage(session.context);
-    console.log(`Attached to tab: ${page.url() || "about:blank"}`);
+    await withLogContext(
+      {
+        account: PROFILE_UUID.slice(-8),
+        accountUuid: PROFILE_UUID,
+        runTag: "test-script",
+      },
+      async () => {
+        const session = await openProfile(PROFILE_UUID);
+        const page = await getWorkingPage(session.context);
+        setPageContext(page, {
+          account: PROFILE_UUID.slice(-8),
+          accountUuid: PROFILE_UUID,
+          runTag: "test-script",
+        });
+        instrumentPage(page);
 
-    await runTestScript(page);
-    console.log("Done. Browser/profile left open for development.");
+        console.log(`Attached to tab: ${page.url() || "about:blank"}`);
+
+        await runTestScript(page);
+        console.log("Done. Browser/profile left open for development.");
+      },
+    );
   })().catch((error) => {
     console.error("Direct run failed:", error);
     process.exitCode = 1;

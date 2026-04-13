@@ -3,6 +3,10 @@
 const NAV_RETRIES = 5;   // max retries for general navigation errors (proxy, connection)
 const TIMEOUT_RETRIES = 10; // max retries for timeout errors (slow proxy)
 const RETRY_WAIT_MS = 5000; // wait between retries
+const {
+  captureIssueScreenshot,
+  waitForLoadStateWithScreenshot,
+} = require("../../utils/runtime-monitor");
 
 function isTimeoutError(err) {
   const msg = err.message || "";
@@ -50,11 +54,17 @@ async function ensureUrl(page, targetUrl, options = {}) {
   for (let attempt = 1; ; attempt += 1) {
     try {
       await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
-      await page.waitForLoadState("networkidle").catch(() => {});
+      await waitForLoadStateWithScreenshot(
+        page,
+        "networkidle",
+        {},
+        "navigation-networkidle-timeout",
+      );
       console.log(`[nav] Navigated to ${targetUrl}`);
       return;
     } catch (err) {
       lastErr = err;
+      await captureIssueScreenshot(page, "navigation-error", err);
 
       const maxRetries = isTimeoutError(err) ? TIMEOUT_RETRIES : NAV_RETRIES;
       const kind = isTimeoutError(err) ? "timeout" : "navigation error";
