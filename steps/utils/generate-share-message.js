@@ -73,26 +73,33 @@ async function requestGitHubModels(messages, options = {}) {
 
 async function generateShareMessage(userIdentity, postContext) {
   try {
+    const normalizedPostContext = String(postContext || "")
+      .replace(/\s+/g, " ")
+      .trim();
     const systemPrompt = `
       USER PERSONA: ${userIdentity}
       
       TASK:
       1. Analyze the "Post Context" to determine the appropriate mood (e.g., excited, cynical, helpful, amused, or shocked).
-      2. Write a Facebook share message in the "USER PERSONA" typing style.
+      2. Write a Facebook comment or opinion in the "USER PERSONA" typing style, as if reacting to the post.
       
       CONSTRAINTS:
-      - VARIETY: Never use "Check this out" or "Pretty cool."
+      - VARIETY: Never start with "Check this out", "Pretty cool", "Wow", or "Interesting."
       - TYPING STYLE: Match how a real person types. If the persona is casual, use lowercase, occasional slang, or sentence fragments. Avoid "AI enthusiasm."
-      - DYNAMIC RESPONSE: If the post is news, react to the news. If it's a product, react to the utility. If it's a joke, react to the humor.
-      - LENGTH: Keep it under 20 words.
-      - OUTPUT: Plain text only. No quotes, no hashtags, no "Mood: [Mood]".
+      - DYNAMIC RESPONSE: If the post is news, react to the news. If it's a product, react to the utility. If it's a joke, react to the humor. If it's an opinion, agree or push back.
+      - LENGTH: Minimum 5 words. Maximum 20 words.
+      - OUTPUT: Plain text only. No quotes, no hashtags, no "Mood: [Mood]", no labels.
     `.trim();
+
+    console.log(
+      `[generate-share-message] Post context: "${normalizedPostContext}"`,
+    );
 
     const { payload } = await requestGitHubModels([
       { role: "system", content: systemPrompt },
       {
         role: "user",
-        content: `Post Context: ${postContext}\n\nGenerate the share message:`,
+        content: `Post Context: ${normalizedPostContext}\n\nGenerate the share message:`,
       },
     ]);
 

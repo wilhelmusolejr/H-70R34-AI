@@ -56,8 +56,7 @@ async function ensureHomePage(page) {
 // Who the automation is acting as — used as the AI persona when generating messages
 const USER_IDENTITY =
   "a casual Facebook user who writes like they are texting a friend—short, low-effort, and uses lowercase";
-// What kind of content is being shared — gives the AI context for the message tone
-const POST_CONTEXT = "a post from my Facebook feed";
+const DEFAULT_POST_CONTEXT = "a post from my Facebook feed";
 
 const LIKE_SELECTOR = 'div[aria-label="Like"]';
 const SHARE_BUTTON_SELECTOR =
@@ -150,6 +149,115 @@ async function hasShareButtonNearTarget(page, targetPageY) {
   );
 
   return Boolean(shareBox);
+}
+
+async function getShareTargetData(page) {
+  return await page.evaluate(
+    ({ shareButtonSelector }) => {
+      const ACTION_TEXT_PATTERN =
+        /^(like|comment|share|send|save|follow|message|copy link|group|messenger|your story|friend's profile|share to a group|share to|see translation|more)$/i;
+
+      function cleanParts(parts) {
+        return Array.from(
+          new Set(
+            parts
+              .map((part) => String(part || "").replace(/\s+/g, " ").trim())
+              .filter(
+                (part) =>
+                  part &&
+                  part.length > 2 &&
+                  !ACTION_TEXT_PATTERN.test(part),
+              ),
+          ),
+        );
+      }
+
+      function getCandidateContainer(element) {
+        const selectors = [
+          '[role="article"]',
+          'div[data-pagelet*="FeedUnit"]',
+          'div[data-pagelet*="MainFeed"]',
+          '[aria-posinset]',
+        ];
+
+        for (const selector of selectors) {
+          const match = element.closest(selector);
+          if (match) {
+            return match;
+          }
+        }
+
+        let current = element.parentElement;
+        while (current) {
+          const textLength = (current.innerText || "").trim().length;
+          const imageCount = current.querySelectorAll("img[alt]").length;
+          if (textLength >= 40 || imageCount > 0) {
+            return current;
+          }
+          current = current.parentElement;
+        }
+
+        return element.parentElement;
+      }
+
+      function extractPostContext(container) {
+        if (!container) {
+          return "";
+        }
+
+        const rawTextParts = (container.innerText || "")
+          .split("\n")
+          .map((part) => part.trim())
+          .filter(Boolean);
+        const textParts = cleanParts(rawTextParts)
+          .filter((part) => part.length > 3)
+          .slice(0, 8);
+
+        const altParts = cleanParts(
+          Array.from(container.querySelectorAll("img[alt]"))
+            .map((img) => img.getAttribute("alt"))
+            .filter(Boolean)
+            .filter((alt) => !/^(image may contain|no photo description available)$/i.test(alt)),
+        ).slice(0, 4);
+
+        const combinedParts = [];
+        if (textParts.length > 0) {
+          combinedParts.push(`Post text: ${textParts.join(" | ")}`);
+        }
+        if (altParts.length > 0) {
+          combinedParts.push(`Image alt text: ${altParts.join(" | ")}`);
+        }
+
+        return combinedParts.join(" || ");
+      }
+
+      const els = Array.from(document.querySelectorAll(shareButtonSelector));
+      const vcenter = window.innerHeight / 2;
+      let best = null;
+      let bestDist = Infinity;
+
+      for (const el of els) {
+        const rect = el.getBoundingClientRect();
+        const dist = Math.abs(rect.y + rect.height / 2 - vcenter);
+        if (dist < bestDist) {
+          bestDist = dist;
+          const container = getCandidateContainer(el);
+          best = {
+            box: {
+              x: rect.x,
+              y: rect.y,
+              width: rect.width,
+              height: rect.height,
+            },
+            postContext: extractPostContext(container),
+          };
+        }
+      }
+
+      return best;
+    },
+    { shareButtonSelector: SHARE_BUTTON_SELECTOR },
+  );
 }
 
 // ---------- human-like typing ----------
@@ -326,31 +434,9 @@ async function sharePost(page, targetPageY) {
   await page.waitForTimeout(randomInt(400, 800));
 
   // find the Share button closest to viewport center
-  const shareBox = await page.evaluate(
-    ({ selector }) => {
-      const els = Array.from(document.querySelectorAll(selector));
-      const vcenter = window.innerHeight / 2;
-      let best = null;
-      let bestDist = Infinity;
-
-      for (const el of els) {
-        const rect = el.getBoundingClientRect();
-        const dist = Math.abs(rect.y + rect.height / 2 - vcenter);
-        if (dist < bestDist) {
-          bestDist = dist;
-          best = {
-            x: rect.x,
-            y: rect.y,
-            width: rect.width,
-            height: rect.height,
-          };
-        }
-      }
-
-      return best;
-    },
-    { selector: SHARE_BUTTON_SELECTOR },
-  );
+  const shareTargetData = await getShareTargetData(page);
+  const shareBox = shareTargetData?.box || null;
+  const postContext = shareTargetData?.postContext || DEFAULT_POST_CONTEXT;
 
   if (!shareBox) {
     await captureIssueScreenshot(page, "share-button-not-found");
@@ -376,7 +462,7 @@ async function sharePost(page, targetPageY) {
     ? await getAvailableShareTextboxSelector(page)
     : null;
   const message = modalState.hasTextbox
-    ? await generateShareMessage(USER_IDENTITY, POST_CONTEXT)
+    ? await generateShareMessage(USER_IDENTITY, postContext)
     : "";
 
   // type the message in the textbox (skip if message is empty)
