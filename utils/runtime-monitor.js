@@ -6,6 +6,7 @@ const logContextStore = new AsyncLocalStorage();
 const PAGE_CONTEXT_KEY = Symbol("automationPageContext");
 const PAGE_MONITORING_KEY = Symbol("automationPageMonitoringInstalled");
 const SCREENSHOT_DIR = path.join(__dirname, "..", "artifacts", "screenshots");
+const LOG_DIR = path.join(__dirname, "..", "artifacts", "logs");
 
 let consoleFormattingInstalled = false;
 
@@ -22,6 +23,11 @@ function timestamp() {
   );
 }
 
+function datestamp() {
+  const now = new Date();
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
 function sanitizeSegment(value) {
   return String(value || "unknown")
     .replace(/[^a-zA-Z0-9_-]+/g, "-")
@@ -31,6 +37,23 @@ function sanitizeSegment(value) {
 
 function getLogContext() {
   return logContextStore.getStore() || {};
+}
+
+function createRunSessionId() {
+  return `${datestamp()}_${pad(new Date().getHours())}${pad(new Date().getMinutes())}${pad(
+    new Date().getSeconds(),
+  )}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function buildProfileLogPath(account, runSessionId, runDate = datestamp()) {
+  const safeAccount = sanitizeSegment(account || "unknown");
+  const safeSessionId = sanitizeSegment(runSessionId || createRunSessionId());
+  const safeRunDate = sanitizeSegment(runDate);
+
+  return path.join(
+    LOG_DIR,
+    `profile-${safeAccount}-${safeRunDate}-${safeSessionId}.log`,
+  );
 }
 
 function formatPrefix() {
@@ -45,7 +68,43 @@ function formatPrefix() {
     segments.push(`[run:${ctx.runTag}]`);
   }
 
+  if (ctx.runSessionId) {
+    segments.push(`[session:${ctx.runSessionId}]`);
+  }
+
   return segments.join(" ");
+}
+
+function stringifyLogArg(arg) {
+  if (typeof arg === "string") {
+    return arg;
+  }
+
+  if (arg instanceof Error) {
+    return arg.stack || arg.message;
+  }
+
+  try {
+    return JSON.stringify(arg);
+  } catch {
+    return String(arg);
+  }
+}
+
+function appendLogLine(line) {
+  const ctx = getLogContext();
+  if (!ctx.logFilePath) {
+    return;
+  }
+
+  try {
+    fs.mkdirSync(path.dirname(ctx.logFilePath), { recursive: true });
+    fs.appendFileSync(ctx.logFilePath, `${line}\n`, "utf8");
+  } catch (error) {
+    process.stderr.write(
+      `[runtime-monitor] Failed to write log file ${ctx.logFilePath}: ${error.message}\n`,
+    );
+  }
 }
 
 function installConsoleFormatting() {
@@ -58,14 +117,34 @@ function installConsoleFormatting() {
   for (const method of ["log", "warn", "error"]) {
     const original = console[method].bind(console);
     console[method] = (...args) => {
-      original(formatPrefix(), ...args);
+      const prefix = formatPrefix();
+      original(prefix, ...args);
+      appendLogLine([prefix, ...args.map(stringifyLogArg)].join(" "));
     };
   }
 }
 
 async function withLogContext(context, fn) {
   const parent = getLogContext();
-  return logContextStore.run({ ...parent, ...context }, fn);
+  const merged = { ...parent, ...context };
+
+  if (!merged.runDate) {
+    merged.runDate = datestamp();
+  }
+
+  if (!merged.runSessionId) {
+    merged.runSessionId = createRunSessionId();
+  }
+
+  if (!merged.logFilePath && merged.account) {
+    merged.logFilePath = buildProfileLogPath(
+      merged.account,
+      merged.runSessionId,
+      merged.runDate,
+    );
+  }
+
+  return logContextStore.run(merged, fn);
 }
 
 function setPageContext(page, context) {
@@ -154,6 +233,17 @@ async function waitForLoadStateWithScreenshot(page, state, options = {}, label) 
   }
 }
 
+async function waitForLoadStateBestEffort(page, state, options = {}, label) {
+  try {
+    return await page.waitForLoadState(state, options);
+  } catch (error) {
+    console.warn(
+      `[load-state] ${label || state} did not settle; continuing: ${error.message}`,
+    );
+    return null;
+  }
+}
+
 function instrumentPage(page) {
   if (!page || page[PAGE_MONITORING_KEY]) {
     return;
@@ -173,13 +263,17 @@ function instrumentPage(page) {
 }
 
 module.exports = {
+  buildProfileLogPath,
   captureIssueScreenshot,
+  createRunSessionId,
+  datestamp,
   getLogContext,
   installConsoleFormatting,
   instrumentPage,
   runWithErrorScreenshot,
   setPageContext,
   timestamp,
+  waitForLoadStateBestEffort,
   waitForLoadStateWithScreenshot,
   withLogContext,
 };

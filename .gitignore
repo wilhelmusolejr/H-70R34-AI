@@ -19,6 +19,7 @@ test-results/
 blob-report/
 trace/
 traces/
+artifacts/
 
 # Local/editor/system files
 .claude/

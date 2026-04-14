@@ -4,6 +4,7 @@ const PROFILE_UUID =
   "local-cb754975-1f0f-49d9-a6ea-ae56b6175dd0";
 const {
   captureIssueScreenshot,
+  createRunSessionId,
   instrumentPage,
   setPageContext,
   waitForLoadStateWithScreenshot,
@@ -189,19 +190,24 @@ if (require.main === module) {
   }
 
   (async () => {
+    const runSessionId = createRunSessionId();
+
     await withLogContext(
       {
         account: PROFILE_UUID.slice(-8),
         accountUuid: PROFILE_UUID,
         runTag: "test-script",
+        runSessionId,
       },
       async () => {
         const session = await openProfile(PROFILE_UUID);
         const page = await getWorkingPage(session.context);
+        console.log(`Session started: ${runSessionId}`);
         setPageContext(page, {
           account: PROFILE_UUID.slice(-8),
           accountUuid: PROFILE_UUID,
           runTag: "test-script",
+          runSessionId,
         });
         instrumentPage(page);
 

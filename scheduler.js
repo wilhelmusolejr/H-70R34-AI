@@ -19,6 +19,7 @@ const path = require("path");
 const { openProfile, closeProfile } = require("./hidemium");
 const runHomepageInteraction = require("./steps/homepage-interaction");
 const {
+  createRunSessionId,
   captureIssueScreenshot,
   instrumentPage,
   runWithErrorScreenshot,
@@ -29,16 +30,14 @@ const {
 // ─── Config ──────────────────────────────────────────────────────────────────
 
 // Add all profile UUIDs that should run every day
-const PROFILE_UUIDS = [
-  "local-7ffc7c92-2399-481e-821c-f6d0724ef55a",
-  "local-cb754975-1f0f-49d9-a6ea-ae56b6175dd0",
-];
+const PROFILE_UUIDS = ["local-cb754975-1f0f-49d9-a6ea-ae56b6175dd0"];
 
 const MAIN_TASK = runHomepageInteraction;
 const MAIN_TASK_FILE = "homepage-interaction.js";
 const MAIN_TASK_LABEL = MAIN_TASK_FILE.replace(".js", "");
 
 const MAX_CONCURRENT = 3; // how many profiles run at the same time
+const TEST_MODE = false; // true = skip filler and run only the main task
 const NEXT_RUN_WINDOW_START_HOUR = 0;
 const NEXT_RUN_WINDOW_START_MINUTE = 30;
 const NEXT_RUN_WINDOW_END_HOUR = 1;
@@ -95,20 +94,49 @@ function getNextRunTime(fromTime = new Date()) {
 // Only test-script.js and the main task file are excluded.
 
 const EXCLUDED_FROM_FILLERS = new Set(["test-script.js", MAIN_TASK_FILE]);
+const FILLER_WEIGHTS = {
+  "search-interaction.js": 3,
+  "profile-interaction.js": 1,
+};
 
 const FILLER_STEPS = fs
   .readdirSync(path.join(__dirname, "steps"))
   .filter((f) => f.endsWith(".js") && !EXCLUDED_FROM_FILLERS.has(f))
   .map((f) => ({
     label: f.replace(".js", ""),
+    file: f,
     fn: require(path.join(__dirname, "steps", f)),
   }));
 
-console.log(`[scheduler] Filler pool: ${FILLER_STEPS.map((s) => s.label).join(", ")}\n`);
+console.log(
+  `[scheduler] Filler pool: ${FILLER_STEPS.map((s) => s.label).join(", ")}\n`,
+);
 
 function pickFillers(count) {
-  const shuffled = [...FILLER_STEPS].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, Math.min(count, shuffled.length));
+  const weighted = FILLER_STEPS.flatMap((step) =>
+    Array.from(
+      { length: FILLER_WEIGHTS[step.file] || 1 },
+      () => step,
+    ),
+  );
+  const shuffled = [...weighted].sort(() => Math.random() - 0.5);
+  const picked = [];
+  const seenFiles = new Set();
+
+  for (const step of shuffled) {
+    if (seenFiles.has(step.file)) {
+      continue;
+    }
+
+    picked.push(step);
+    seenFiles.add(step.file);
+
+    if (picked.length >= Math.min(count, FILLER_STEPS.length)) {
+      break;
+    }
+  }
+
+  return picked;
 }
 
 // ─── Run one profile ──────────────────────────────────────────────────────────
@@ -116,15 +144,17 @@ function pickFillers(count) {
 async function runOneProfile(uuid, index) {
   const tag = `[profile-${index + 1}:${uuid.slice(-8)}]`;
   const runTag = `profile-${index + 1}`;
+  const runSessionId = createRunSessionId();
 
   return withLogContext(
-    { account: uuid.slice(-8), accountUuid: uuid, runTag },
+    { account: uuid.slice(-8), accountUuid: uuid, runTag, runSessionId },
     async () => {
       let session;
       let page;
 
       try {
         console.log(`${tag} Opening...`);
+        console.log(`${tag} Session started: ${runSessionId}`);
         session = await openProfile(uuid);
         page =
           session.context.pages().find((p) => p.url() !== "about:blank") ||
@@ -135,15 +165,24 @@ async function runOneProfile(uuid, index) {
           account: uuid.slice(-8),
           accountUuid: uuid,
           runTag,
+          runSessionId,
         });
         instrumentPage(page);
 
-        for (const filler of pickFillers(randomInt(1, 2))) {
-          console.log(`${tag} Filler before: ${filler.label}`);
-          await runWithErrorScreenshot(page, `filler-before-${filler.label}`, () =>
-            filler.fn(page, null),
+        if (!TEST_MODE) {
+          for (const filler of pickFillers(randomInt(1, 2))) {
+            console.log(`${tag} Filler before: ${filler.label}`);
+            await runWithErrorScreenshot(
+              page,
+              `filler-before-${filler.label}`,
+              () => filler.fn(page, null),
+            );
+            await sleep(randomInt(3000, 8000));
+          }
+        } else {
+          console.log(
+            `${tag} Test mode enabled - skipping filler before main task.`,
           );
-          await sleep(randomInt(3000, 8000));
         }
 
         console.log(`${tag} Main: ${MAIN_TASK_LABEL}`);
@@ -152,12 +191,20 @@ async function runOneProfile(uuid, index) {
         );
         await sleep(randomInt(3000, 8000));
 
-        for (const filler of pickFillers(randomInt(1, 2))) {
-          console.log(`${tag} Filler after: ${filler.label}`);
-          await runWithErrorScreenshot(page, `filler-after-${filler.label}`, () =>
-            filler.fn(page, null),
+        if (!TEST_MODE) {
+          for (const filler of pickFillers(randomInt(1, 2))) {
+            console.log(`${tag} Filler after: ${filler.label}`);
+            await runWithErrorScreenshot(
+              page,
+              `filler-after-${filler.label}`,
+              () => filler.fn(page, null),
+            );
+            await sleep(randomInt(3000, 8000));
+          }
+        } else {
+          console.log(
+            `${tag} Test mode enabled - skipping filler after main task.`,
           );
-          await sleep(randomInt(3000, 8000));
         }
 
         console.log(`${tag} Done.`);
@@ -221,6 +268,7 @@ async function runAllProfiles() {
 
 async function main() {
   console.log("[scheduler] Started. Press Ctrl+C to stop.\n");
+  console.log(`[scheduler] Test mode: ${TEST_MODE ? "enabled" : "disabled"}\n`);
 
   while (true) {
     await runAllProfiles();

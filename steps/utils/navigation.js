@@ -54,12 +54,13 @@ async function ensureUrl(page, targetUrl, options = {}) {
   for (let attempt = 1; ; attempt += 1) {
     try {
       await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
-      await waitForLoadStateWithScreenshot(
-        page,
-        "networkidle",
-        {},
-        "navigation-networkidle-timeout",
-      );
+      try {
+        await page.waitForLoadState("networkidle", { timeout: 5000 });
+      } catch (networkIdleError) {
+        console.warn(
+          `[nav] networkidle did not settle for ${targetUrl}; continuing because domcontentloaded already succeeded: ${networkIdleError.message}`,
+        );
+      }
       console.log(`[nav] Navigated to ${targetUrl}`);
       return;
     } catch (err) {

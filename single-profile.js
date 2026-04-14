@@ -5,6 +5,7 @@ const runHomepageInteraction = require("./steps/homepage-interaction");
 const runProfileInteraction = require("./steps/profile-interaction");
 const runSearchInteraction = require("./steps/search-interaction");
 const {
+  createRunSessionId,
   captureIssueScreenshot,
   instrumentPage,
   runWithErrorScreenshot,
@@ -67,11 +68,14 @@ async function ensureStartPage(page) {
 }
 
 async function run() {
+  const runSessionId = createRunSessionId();
+
   return withLogContext(
     {
       account: PROFILE_UUID.slice(-8),
       accountUuid: PROFILE_UUID,
       runTag: "single-profile",
+      runSessionId,
     },
     async () => {
       let browser;
@@ -88,12 +92,14 @@ async function run() {
       try {
         const session = await openProfile(PROFILE_UUID);
         browser = session.browser;
+        console.log(`Session started: ${runSessionId}`);
 
         page = await getWorkingPage(session.context);
         setPageContext(page, {
           account: PROFILE_UUID.slice(-8),
           accountUuid: PROFILE_UUID,
           runTag: "single-profile",
+          runSessionId,
         });
         instrumentPage(page);
 

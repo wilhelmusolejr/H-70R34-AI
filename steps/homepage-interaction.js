@@ -67,6 +67,8 @@ const SHARE_TEXTBOX_SELECTOR =
   'div[role="dialog"] div[contenteditable="true"][role="textbox"]';
 const SHARE_COUNT_MIN = 1;
 const SHARE_COUNT_MAX = 3;
+const SHARE_MODAL_WAIT_ATTEMPTS = 10;
+const SHARE_MODAL_WAIT_TIMEOUT_MS = 30000;
 const SCROLL_DURATION_MIN_MS = 10000;
 const SCROLL_DURATION_MAX_MS = 20000;
 const LOG_INTERVAL_MIN_MS = 10000;
@@ -163,7 +165,48 @@ async function humanType(page, selector, text) {
 
 // ---------- share a post ----------
 
-async function sharePost(page, targetPageY, message) {
+async function waitForShareModalReady(page) {
+  for (let attempt = 1; attempt <= SHARE_MODAL_WAIT_ATTEMPTS; attempt += 1) {
+    try {
+      await page.waitForSelector('div[role="dialog"]', {
+        timeout: SHARE_MODAL_WAIT_TIMEOUT_MS,
+      });
+
+      const modalStateHandle = await page.waitForFunction(
+        ({ textboxSelector, shareNowSelector }) => {
+          const hasTextbox = Boolean(document.querySelector(textboxSelector));
+          const hasShareNow = Boolean(document.querySelector(shareNowSelector));
+
+          if (!hasTextbox && !hasShareNow) {
+            return null;
+          }
+
+          return { hasTextbox, hasShareNow };
+        },
+        {
+          textboxSelector: SHARE_TEXTBOX_SELECTOR,
+          shareNowSelector: SHARE_NOW_SELECTOR,
+        },
+        { timeout: SHARE_MODAL_WAIT_TIMEOUT_MS },
+      );
+
+      return await modalStateHandle.jsonValue();
+    } catch (error) {
+      console.warn(
+        `[fb-interact] Share modal not ready yet (attempt ${attempt}/${SHARE_MODAL_WAIT_ATTEMPTS}): ${error.message}`,
+      );
+
+      if (attempt === SHARE_MODAL_WAIT_ATTEMPTS) {
+        await captureIssueScreenshot(page, "share-modal-not-ready", error);
+        return null;
+      }
+    }
+  }
+
+  return null;
+}
+
+async function sharePost(page, targetPageY) {
   // scroll to the post
   await humanScrollTo(page, targetPageY);
   await page.waitForTimeout(randomInt(400, 800));
@@ -207,20 +250,20 @@ async function sharePost(page, targetPageY, message) {
   await page.mouse.click(cx, cy, { delay: randomInt(40, 120) });
   console.log(`[fb-interact] Clicked Share button at pageY≈${targetPageY}`);
 
-  // wait for the modal dialog to appear
-  try {
-    await page.waitForSelector('div[role="dialog"]', { timeout: 5000 });
-  } catch (error) {
-    await captureIssueScreenshot(page, "share-modal-not-found", error);
-    console.log("[fb-interact] Share modal did not appear.");
+  const modalState = await waitForShareModalReady(page);
+  if (!modalState) {
+    console.log("[fb-interact] Share modal did not become ready.");
     return false;
   }
   await page.waitForTimeout(randomInt(800, 1500));
 
+  const message = modalState.hasTextbox
+    ? await generateShareMessage(USER_IDENTITY, POST_CONTEXT)
+    : "";
+
   // type the message in the textbox (skip if message is empty)
-  if (message) {
+  if (modalState.hasTextbox && message) {
     try {
-      await page.waitForSelector(SHARE_TEXTBOX_SELECTOR, { timeout: 3000 });
       await humanType(page, SHARE_TEXTBOX_SELECTOR, message);
       console.log(`[fb-interact] Typed share message: "${message}"`);
     } catch (error) {
@@ -390,8 +433,7 @@ async function runHomepageInteraction(page) {
     // share this post if it's one of the chosen ones
     if (shareIndexes.has(i)) {
       await page.waitForTimeout(randomInt(1000, 2000));
-      const message = await generateShareMessage(USER_IDENTITY, POST_CONTEXT);
-      await sharePost(page, target.pageY, message);
+      await sharePost(page, target.pageY);
     }
 
     if (i < selected.length - 1) {

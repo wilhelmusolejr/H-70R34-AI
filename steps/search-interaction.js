@@ -5,6 +5,7 @@ const {
 } = require("./utils/scroll-utils");
 const {
   captureIssueScreenshot,
+  waitForLoadStateBestEffort,
   waitForLoadStateWithScreenshot,
 } = require("../utils/runtime-monitor");
 
@@ -234,10 +235,10 @@ async function runSearchInteraction(page) {
     {},
     "search-results-domcontentloaded",
   );
-  await waitForLoadStateWithScreenshot(
+  await waitForLoadStateBestEffort(
     page,
     "networkidle",
-    {},
+    { timeout: 5000 },
     "search-results-networkidle",
   );
   await page.waitForTimeout(randomInt(800, 1400));
