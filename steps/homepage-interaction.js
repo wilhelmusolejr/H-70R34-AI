@@ -63,11 +63,11 @@ const LIKE_SELECTOR = 'div[aria-label="Like"]';
 const SHARE_BUTTON_SELECTOR =
   '[aria-label="Send this to friends or post it on your profile."]';
 const SHARE_DIALOG_SELECTOR = 'div[role="dialog"]';
-const SHARE_CLOSE_SELECTOR = 'div[role="dialog"] [aria-label="Close"]';
+const SHARE_CLOSE_SELECTOR = '[aria-label="Close"]';
 const SHARE_NOW_SELECTOR = '[aria-label="Share now"]';
 const SHARE_TEXTBOX_SELECTORS = [
-  'div[role="dialog"] div[contenteditable="true"][role="textbox"][aria-placeholder="Say something about this..."]',
-  'div[role="dialog"] div[contenteditable="true"][role="textbox"]',
+  'div[contenteditable="true"][role="textbox"][aria-placeholder="Say something about this..."]',
+  'div[contenteditable="true"][role="textbox"]',
 ];
 const SHARE_COUNT_MIN = 1;
 const SHARE_COUNT_MAX = 3;
@@ -154,8 +154,12 @@ async function hasShareButtonNearTarget(page, targetPageY) {
 
 // ---------- human-like typing ----------
 
-async function humanType(page, selector, text) {
-  await page.click(selector);
+async function humanType(page, target, text) {
+  if (typeof target === "string") {
+    await page.click(target);
+  } else {
+    await target.click();
+  }
   await page.waitForTimeout(randomInt(300, 600));
 
   for (const char of text) {
@@ -170,41 +174,103 @@ async function humanType(page, selector, text) {
 // ---------- share a post ----------
 
 async function getAvailableShareTextboxSelector(page) {
+  const modalState = await getShareDialogState(page);
+  if (!modalState) {
+    return null;
+  }
+
+  const shareDialog = page.locator(SHARE_DIALOG_SELECTOR).nth(modalState.dialogIndex);
   for (const selector of SHARE_TEXTBOX_SELECTORS) {
-    const exists = await page.$(selector);
-    if (exists) {
-      return selector;
+    const textbox = shareDialog.locator(selector).first();
+    if ((await textbox.count()) > 0) {
+      return textbox;
     }
   }
 
   return null;
 }
 
+async function getShareDialogState(page) {
+  return await page.evaluate(
+    ({ dialogSelector, textboxSelectors, shareNowSelector, closeSelector }) => {
+      const dialogs = Array.from(document.querySelectorAll(dialogSelector));
+
+      for (let index = 0; index < dialogs.length; index += 1) {
+        const dialog = dialogs[index];
+        const textContent = (dialog.textContent || "").replace(/\s+/g, " ").trim();
+        const hasTextbox = textboxSelectors.some((selector) =>
+          Boolean(dialog.querySelector(selector)),
+        );
+        const hasShareNow = Boolean(dialog.querySelector(shareNowSelector));
+        const hasClose = Boolean(dialog.querySelector(closeSelector));
+        const looksLikeShareDialog =
+          hasShareNow ||
+          hasTextbox ||
+          (hasClose && /\bshare\b/i.test(textContent));
+
+        if (!looksLikeShareDialog) {
+          continue;
+        }
+
+        return {
+          dialogIndex: index,
+          hasTextbox,
+          hasShareNow,
+          hasClose,
+        };
+      }
+
+      return null;
+    },
+    {
+      dialogSelector: SHARE_DIALOG_SELECTOR,
+      textboxSelectors: SHARE_TEXTBOX_SELECTORS,
+      shareNowSelector: SHARE_NOW_SELECTOR,
+      closeSelector: SHARE_CLOSE_SELECTOR,
+    },
+  );
+}
+
 async function waitForShareModalReady(page) {
   for (let attempt = 1; attempt <= SHARE_MODAL_WAIT_ATTEMPTS; attempt += 1) {
     try {
-      await page.waitForSelector(SHARE_DIALOG_SELECTOR, {
-        timeout: SHARE_MODAL_WAIT_TIMEOUT_MS,
-      });
-
       const modalStateHandle = await page.waitForFunction(
-        ({ textboxSelectors, shareNowSelector, dialogSelector }) => {
-          const hasDialog = Boolean(document.querySelector(dialogSelector));
-          const hasTextbox = textboxSelectors.some((selector) =>
-            Boolean(document.querySelector(selector)),
-          );
-          const hasShareNow = Boolean(document.querySelector(shareNowSelector));
+        ({ dialogSelector, textboxSelectors, shareNowSelector, closeSelector }) => {
+          const dialogs = Array.from(document.querySelectorAll(dialogSelector));
 
-          if (!hasDialog || (!hasTextbox && !hasShareNow)) {
-            return null;
+          for (let index = 0; index < dialogs.length; index += 1) {
+            const dialog = dialogs[index];
+            const textContent = (dialog.textContent || "")
+              .replace(/\s+/g, " ")
+              .trim();
+            const hasTextbox = textboxSelectors.some((selector) =>
+              Boolean(dialog.querySelector(selector)),
+            );
+            const hasShareNow = Boolean(dialog.querySelector(shareNowSelector));
+            const hasClose = Boolean(dialog.querySelector(closeSelector));
+            const looksLikeShareDialog =
+              hasShareNow ||
+              hasTextbox ||
+              (hasClose && /\bshare\b/i.test(textContent));
+
+            if (!looksLikeShareDialog || (!hasTextbox && !hasShareNow)) {
+              continue;
+            }
+
+            return {
+              dialogIndex: index,
+              hasTextbox,
+              hasShareNow,
+              hasClose,
+            };
           }
-
-          return { hasDialog, hasTextbox, hasShareNow };
+          return null;
         },
         {
+          dialogSelector: SHARE_DIALOG_SELECTOR,
           textboxSelectors: SHARE_TEXTBOX_SELECTORS,
           shareNowSelector: SHARE_NOW_SELECTOR,
-          dialogSelector: SHARE_DIALOG_SELECTOR,
+          closeSelector: SHARE_CLOSE_SELECTOR,
         },
         { timeout: SHARE_MODAL_WAIT_TIMEOUT_MS },
       );
@@ -226,21 +292,21 @@ async function waitForShareModalReady(page) {
 }
 
 async function closeShareModal(page) {
-  const closeButton = await page.$(SHARE_CLOSE_SELECTOR);
-  if (closeButton) {
+  const modalState = await getShareDialogState(page);
+  if (!modalState) {
+    return false;
+  }
+
+  const shareDialog = page.locator(SHARE_DIALOG_SELECTOR).nth(modalState.dialogIndex);
+  const closeButton = shareDialog.locator(SHARE_CLOSE_SELECTOR).first();
+  if ((await closeButton.count()) > 0) {
     await closeButton.click({ delay: randomInt(40, 120) }).catch(() => {});
     await page.waitForTimeout(randomInt(400, 800));
     console.log("[fb-interact] Closed share modal with Close button.");
     return true;
   }
 
-  const dialogBox = await page.evaluate((selector) => {
-    const dialog = document.querySelector(selector);
-    if (!dialog) return null;
-
-    const rect = dialog.getBoundingClientRect();
-    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
-  }, SHARE_DIALOG_SELECTOR);
+  const dialogBox = await shareDialog.boundingBox();
 
   if (!dialogBox) {
     return false;
@@ -330,13 +396,18 @@ async function sharePost(page, targetPageY) {
 
   // click "Share now"
   const shareNowBox = await page.evaluate(
-    ({ selector }) => {
-      const el = document.querySelector(selector);
+    ({ dialogSelector, dialogIndex, selector }) => {
+      const dialog = document.querySelectorAll(dialogSelector)[dialogIndex];
+      const el = dialog?.querySelector(selector);
       if (!el) return null;
       const rect = el.getBoundingClientRect();
       return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
     },
-    { selector: SHARE_NOW_SELECTOR },
+    {
+      dialogSelector: SHARE_DIALOG_SELECTOR,
+      dialogIndex: modalState.dialogIndex,
+      selector: SHARE_NOW_SELECTOR,
+    },
   );
 
   if (!shareNowBox) {
@@ -425,10 +496,11 @@ async function runHomepageInteraction(page) {
 
   const shareCandidateSet = new Set(shareableIndexes);
   console.log(
-    `[fb-interact] Need ${requestedShareCount} successful share(s). Candidate indexes: ${shareableIndexes.join(", ")}`,
+    `[fb-interact] Planned share attempts: ${requestedShareCount}. Candidate indexes: ${shareableIndexes.join(", ")}`,
   );
 
   // pass 2: scroll to each target and click
+  let completedShareAttempts = 0;
   let successfulShares = 0;
   for (let i = 0; i < selected.length; i += 1) {
     const target = selected[i];
@@ -485,19 +557,20 @@ async function runHomepageInteraction(page) {
 
     // share this post if it's one of the chosen ones
     if (
-      successfulShares < requestedShareCount &&
+      completedShareAttempts < requestedShareCount &&
       shareCandidateSet.has(i)
     ) {
       await page.waitForTimeout(randomInt(1000, 2000));
       const didShare = await sharePost(page, target.pageY);
+      completedShareAttempts += 1;
       if (didShare) {
         successfulShares += 1;
         console.log(
-          `[fb-interact] Successful shares: ${successfulShares}/${requestedShareCount}`,
+          `[fb-interact] Share attempts used: ${completedShareAttempts}/${requestedShareCount}. Successful shares: ${successfulShares}.`,
         );
       } else {
         console.log(
-          `[fb-interact] Share failed for target at pageY≈${target.pageY}. Continuing to the next post without deducting the share target.`,
+          `[fb-interact] Share failed for target at pageY≈${target.pageY}. Counting this attempt and moving to the next post.`,
         );
       }
     }
@@ -509,11 +582,9 @@ async function runHomepageInteraction(page) {
     }
   }
 
-  if (successfulShares < requestedShareCount) {
-    console.log(
-      `[fb-interact] Finished with ${successfulShares}/${requestedShareCount} successful share(s).`,
-    );
-  }
+  console.log(
+    `[fb-interact] Finished with ${successfulShares} successful share(s) across ${completedShareAttempts}/${requestedShareCount} planned attempt(s).`,
+  );
 }
 
 module.exports = runHomepageInteraction;
